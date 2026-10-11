@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Перекат</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Перекат</h1>
+      <p id="self" class="muted"></p>
+    </div>
+    <div class="actions">
+      <button id="refresh" class="ghost" title="Поискать устройства ещё раз">Обновить</button>
+      <button id="quit" class="ghost" title="Остановить Перекат и закрыть окно">Выйти</button>
+    </div>
+  </header>
+
+  <main>
+    <h2>Устройства</h2>
+    <div id="devices"></div>
+    <p id="empty" class="hint" hidden>Пока никого не видно. Запустите Перекат или KDE Connect на другом устройстве в этой же сети.</p>
+    <p id="error" class="hint error" hidden></p>
+
+    <section id="transfers-section" hidden>
+      <h2>Файлы</h2>
+      <div id="transfers"></div>
+    </section>
+  </main>
+
+  <div id="remote" class="overlay" hidden>
+    <div class="overlay-card">
+      <div class="pulse"></div>
+      <h2>Режим пульта</h2>
+      <p>Мышь управляет устройством <b id="remote-name"></b></p>
+      <p class="muted">Нажмите <kbd>Esc</kbd>, чтобы вернуть мышь</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
