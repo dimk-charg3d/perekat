@@ -25,6 +25,7 @@ import (
 	"github.com/charg3d/perekat/internal/ipc"
 	"github.com/charg3d/perekat/internal/protocol"
 	"github.com/charg3d/perekat/internal/ui"
+	"github.com/charg3d/perekat/internal/version"
 )
 
 // State is everything the window shows.
@@ -107,6 +108,9 @@ func (a *App) FS(id string, req core.FSRequest) (core.FSResult, error) {
 func (a *App) FSPaste(src string, paths []string, dst, dir string, move bool) error {
 	return a.client.FSPaste(ipc.Paste{Src: src, Paths: paths, Dst: dst, Dir: dir, Move: move})
 }
+
+// Version is the version of this build.
+func (a *App) Version() string { return version.Version }
 
 // UIState returns what the window remembers between runs, as JSON.
 func (a *App) UIState() (string, error) { return a.client.UIState() }

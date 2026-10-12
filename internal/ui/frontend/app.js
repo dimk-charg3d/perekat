@@ -81,6 +81,8 @@ let snapshot = "";
 const narrow = window.matchMedia("(max-width: 720px)");
 let view = narrow.matches ? { kind: "home" } : { kind: "device", id: null };
 let failures = 0;
+// build is the version of perekat, shown under the name of this device.
+let build = "";
 
 // Every device has its own colour: the one the user chose, or one picked
 // from the palette by the device id so that it stays the same.
@@ -155,7 +157,7 @@ function renderSidebar() {
   $("refresh").innerHTML = icons.refresh;
   $("refresh").title = t("refresh");
   $("no-devices").textContent = t("noDevices");
-  $("self").textContent = state ? t("thisDevice", state.self.deviceName) : "";
+  $("self").textContent = state ? t("thisDevice", state.self.deviceName) + (build ? " · " + build : "") : "";
 
   const relay = state && state.relay;
   $("nav-relay").replaceChildren(h("span", { class: "nav-icon", icon: "cloud" }), h("span", { class: "nav-text" }, t("remoteAccess")));
@@ -627,6 +629,10 @@ $("nav-settings").addEventListener("click", () => show({ kind: "settings" }));
   } catch (err) {
     // The default language stays.
   }
+  api
+    .Version()
+    .then((v) => (build = v === "dev" ? "" : v))
+    .catch(() => {});
   document.documentElement.lang = language;
   await refresh();
   const first = await api.InitialView();

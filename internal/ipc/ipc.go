@@ -25,6 +25,7 @@ import (
 	"github.com/charg3d/perekat/internal/identity"
 	"github.com/charg3d/perekat/internal/input"
 	"github.com/charg3d/perekat/internal/protocol"
+	"github.com/charg3d/perekat/internal/version"
 )
 
 // SocketPath returns where the daemon listens for local clients.
@@ -221,6 +222,9 @@ func Handler(c *core.Core) http.Handler {
 				return
 			}
 		}
+	})
+	mux.HandleFunc("GET /version", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(version.Version)
 	})
 	mux.HandleFunc("GET /ui", func(w http.ResponseWriter, r *http.Request) {
 		w.Write(c.UIState())

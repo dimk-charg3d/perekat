@@ -23,6 +23,7 @@ import (
 	"github.com/charg3d/perekat/internal/ipc"
 	"github.com/charg3d/perekat/internal/phone"
 	"github.com/charg3d/perekat/internal/ui"
+	"github.com/charg3d/perekat/internal/version"
 )
 
 const usage = `perekat links Arch and Windows machines on a local network.
@@ -41,6 +42,7 @@ Usage:
   perekat commands          show the file that defines the commands this machine offers
   perekat ping <device>     show a notification on a device
   perekat ring <device>     make a device play a sound
+  perekat version           show the version
 
 Remote access, for devices that are not on the same network:
   perekat relay                         show the status and the code other devices join with
@@ -58,6 +60,8 @@ func main() {
 	}
 	var err error
 	switch cmd, args := os.Args[1], os.Args[2:]; {
+	case cmd == "version" || cmd == "--version":
+		fmt.Println("perekat", version.Version)
 	case cmd == "daemon":
 		err = daemon(args)
 	case cmd == "phone":

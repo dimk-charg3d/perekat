@@ -2,3 +2,5 @@
 *.exe
 /internal/deploy/bin/
 /android/build/
+/dist/
+*.idsig

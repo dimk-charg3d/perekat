@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 SDK=${ANDROID_HOME:-$HOME/Android/Sdk}
 TOOLS=$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)
 PLATFORM=$(ls -d "$SDK"/platforms/android-* | sort -V | tail -1)/android.jar
-VERSION=${VERSION:-0.1}
+VERSION=${VERSION:-dev}
 OUT=build
 rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/gen" "$OUT/lib/arm64-v8a" "$OUT/res/mipmap-xxhdpi"
@@ -16,7 +16,7 @@ mkdir -p "$OUT/classes" "$OUT/gen" "$OUT/lib/arm64-v8a" "$OUT/res/mipmap-xxhdpi"
 # The daemon. It is named like a library so that Android unpacks it into the
 # one folder an application may run programs from.
 (cd .. && make relay >/dev/null && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-    go build -tags phone -trimpath -ldflags "-s -w" -o "android/$OUT/lib/arm64-v8a/libperekat.so" ./cmd/perekat)
+    go build -tags phone -trimpath -ldflags "-s -w -X github.com/charg3d/perekat/internal/version.Version=$VERSION" -o "android/$OUT/lib/arm64-v8a/libperekat.so" ./cmd/perekat)
 
 cp -r res/. "$OUT/res/"
 magick -background none ../packaging/perekat.svg -resize 144x144 "$OUT/res/mipmap-xxhdpi/ic_launcher.png"
