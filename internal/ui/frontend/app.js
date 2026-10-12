@@ -417,6 +417,7 @@ async function renderSettings() {
           settings.clipboard = $("set-clipboard").checked;
           settings.kdeConnect = $("set-kde").checked;
           settings.fileAccess = $("set-files").checked;
+          if ($("set-autostart")) settings.autostart = $("set-autostart").checked;
           await api.SaveSettings(settings);
         }, t("saved"));
       },
@@ -465,6 +466,14 @@ async function renderSettings() {
       h("span", {}, t("fileAccess"), h("span", { class: "muted small block" }, t("fileAccessHint"))),
       h("input", { id: "set-files", type: "checkbox", class: "switch", checked: settings.fileAccess }),
     ),
+    settings.canAutostart
+      ? h(
+          "label",
+          { class: "switch-line" },
+          h("span", {}, t("autostart"), h("span", { class: "muted small block" }, t("autostartHint"))),
+          h("input", { id: "set-autostart", type: "checkbox", class: "switch", checked: settings.autostart }),
+        )
+      : null,
     h("div", { class: "row between" }, h("div", { class: "segments" }, langButton("ru", "Русский"), langButton("en", "English")), h("button", { class: "button primary" }, t("save"))),
   );
 

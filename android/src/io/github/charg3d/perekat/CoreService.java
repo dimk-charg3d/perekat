@@ -11,6 +11,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.drawable.Icon;
@@ -41,6 +44,7 @@ import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
+import java.net.URLEncoder;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -56,6 +60,7 @@ public class CoreService extends Service {
     private static final String TAG = "Perekat";
     private static final String CHANNEL_SERVICE = "service";
     private static final String CHANNEL_EVENTS = "events";
+    static final String ACTION_SHARE = "io.github.charg3d.perekat.SHARE";
 
     /** Address of the interface, set once the daemon is up. */
     static volatile String url;
@@ -100,7 +105,112 @@ public class CoreService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_SHARE.equals(intent.getAction())) {
+            new Thread(() -> share(intent), "share").start();
+        }
         return START_STICKY;
+    }
+
+    /** Sends what was shared from another application, showing how it goes. */
+    private void share(Intent work) {
+        String label = work.getStringExtra("label");
+        String folder = work.getStringExtra("folder");
+        String text = work.getStringExtra("text");
+        List<Uri> files = work.getParcelableArrayListExtra("files");
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        int id = nextNotification++;
+        Notification.Builder progress = new Notification.Builder(this, CHANNEL_SERVICE)
+                .setSmallIcon(android.R.drawable.stat_sys_upload)
+                .setContentTitle(getString(R.string.share_sending, label))
+                .setOngoing(true)
+                .setOnlyAlertOnce(true);
+        String result;
+        try {
+            if (!waitReady(8000)) throw new Exception(getString(R.string.not_ready));
+            String device = "?device=" + URLEncoder.encode(work.getStringExtra("device"), "UTF-8");
+            if (files == null || files.isEmpty()) {
+                call("POST", "text" + device, JSONObject.quote(text), 15000);
+            } else {
+                long total = 0;
+                for (Uri file : files) total += Math.max(0, sizeOf(file));
+                manager.notify(id, progress.setProgress(100, 0, total == 0).build());
+                String path = folder == null ? "upload" + device : "fs/upload" + device + "&dir=" + URLEncoder.encode(folder, "UTF-8");
+                upload(path, files, total, (sent, all) ->
+                        manager.notify(id, progress.setProgress(100, (int) (sent * 100 / Math.max(1, all)), all == 0)
+                                .setContentText(nameOf(files.get(0)) + (files.size() > 1 ? " +" + (files.size() - 1) : "")).build()));
+            }
+            result = getString(R.string.share_done, label);
+        } catch (Exception e) {
+            Log.w(TAG, "share", e);
+            result = getString(R.string.share_failed, String.valueOf(e.getMessage()));
+        }
+        manager.notify(id, new Notification.Builder(this, CHANNEL_EVENTS)
+                .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+                .setContentTitle(result)
+                .setContentIntent(openApp())
+                .setAutoCancel(true)
+                .build());
+    }
+
+    private interface Progress {
+        void at(long sent, long total);
+    }
+
+    /** Streams files to the daemon, which passes them on. */
+    private void upload(String path, List<Uri> files, long total, Progress progress) throws Exception {
+        String boundary = "perekat" + System.nanoTime();
+        HttpURLConnection connection = open("POST", path);
+        try {
+            connection.setReadTimeout(0);
+            connection.setDoOutput(true);
+            connection.setChunkedStreamingMode(64 * 1024);
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            try (OutputStream out = connection.getOutputStream()) {
+                byte[] buffer = new byte[64 * 1024];
+                long sent = 0;
+                long shown = 0;
+                for (Uri file : files) {
+                    String name = nameOf(file).replace("\"", "'").replace("\r", "").replace("\n", "");
+                    out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + name
+                            + "\"\r\nContent-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                    try (InputStream in = getContentResolver().openInputStream(file)) {
+                        if (in == null) throw new Exception(name);
+                        for (int n; (n = in.read(buffer)) > 0; ) {
+                            out.write(buffer, 0, n);
+                            sent += n;
+                            if (System.currentTimeMillis() - shown > 500) {
+                                shown = System.currentTimeMillis();
+                                progress.at(sent, total);
+                            }
+                        }
+                    }
+                    out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+                }
+                out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+            }
+            if (connection.getResponseCode() != 200) throw new Exception(read(connection.getErrorStream()));
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private String nameOf(Uri file) {
+        try (Cursor cursor = getContentResolver().query(file, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) return cursor.getString(0);
+        } catch (Exception ignored) {
+            // Not every source tells the name.
+        }
+        String last = file.getLastPathSegment();
+        return last == null ? "file" : last.substring(last.lastIndexOf('/') + 1);
+    }
+
+    private long sizeOf(Uri file) {
+        try (Cursor cursor = getContentResolver().query(file, new String[]{OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0);
+        } catch (Exception ignored) {
+            // Not every source tells the size.
+        }
+        return 0;
     }
 
     @Override

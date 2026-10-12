@@ -216,6 +216,7 @@ func ensureDaemon(ctx context.Context, client *ipc.Client, log *slog.Logger) err
 func main() {
 	view := flag.String("view", "", "page to open: relay, settings or files")
 	open := flag.String("open", "", "a file or a folder of this machine to show in the file manager")
+	hidden := flag.Bool("hidden", false, "start in the background, without showing the window")
 	flag.Parse()
 	if *open != "" {
 		*view = "files"
@@ -259,9 +260,13 @@ func main() {
 		AssetServer:       &assetserver.Options{Assets: ui.Assets(), Handler: client.Files()},
 		Bind:              []any{a},
 		HideWindowOnClose: true,
+		StartHidden:       *hidden,
 		// Files dropped from the system's file manager arrive with their paths.
 		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
-		OnStartup:   func(ctx context.Context) { a.ctx = ctx },
+		OnStartup: func(ctx context.Context) {
+			a.ctx = ctx
+			startTray(a)
+		},
 		// Closing the window keeps perekat running; launching it again brings
 		// the window back.
 		SingleInstanceLock: &options.SingleInstanceLock{

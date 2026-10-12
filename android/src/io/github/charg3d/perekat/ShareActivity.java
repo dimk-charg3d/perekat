@@ -4,20 +4,13 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
-import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.OpenableColumns;
 import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -147,68 +140,27 @@ public class ShareActivity extends Activity {
                 .show();
     }
 
+    /**
+     * Hands the work to the service and leaves: the files travel in the
+     * background, with their progress in a notification.
+     */
     private void send(Target target) {
-        dialog = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setMessage(getString(R.string.share_sending, target.label))
-                .setCancelable(false)
-                .show();
-        new Thread(() -> {
-            String result;
-            try {
-                String device = "?device=" + URLEncoder.encode(target.device, "UTF-8");
-                if (files.isEmpty()) {
-                    CoreService.call("POST", "text" + device, JSONObject.quote(text), 15000);
-                } else if (target.folder != null) {
-                    upload("fs/upload" + device + "&dir=" + URLEncoder.encode(target.folder, "UTF-8"));
-                } else {
-                    upload("upload" + device);
-                }
-                result = getString(R.string.share_done, target.label);
-            } catch (Exception e) {
-                result = getString(R.string.share_failed, String.valueOf(e.getMessage()));
-            }
-            String message = result;
-            runOnUiThread(() -> done(message));
-        }).start();
-    }
-
-    /** Streams the shared files to the daemon, which passes them on. */
-    private void upload(String path) throws Exception {
-        String boundary = "perekat" + System.nanoTime();
-        HttpURLConnection connection = CoreService.open("POST", path);
-        try {
-            connection.setReadTimeout(0);
-            connection.setDoOutput(true);
-            connection.setChunkedStreamingMode(64 * 1024);
-            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-            try (OutputStream out = connection.getOutputStream()) {
-                byte[] buffer = new byte[64 * 1024];
-                for (Uri file : files) {
-                    String name = nameOf(file).replace("\"", "'").replace("\r", "").replace("\n", "");
-                    out.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + name
-                            + "\"\r\nContent-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-                    try (InputStream in = getContentResolver().openInputStream(file)) {
-                        if (in == null) throw new Exception(name);
-                        for (int n; (n = in.read(buffer)) > 0; ) out.write(buffer, 0, n);
-                    }
-                    out.write("\r\n".getBytes(StandardCharsets.UTF_8));
-                }
-                out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-            }
-            if (connection.getResponseCode() != 200) throw new Exception(CoreService.read(connection.getErrorStream()));
-        } finally {
-            connection.disconnect();
+        Intent work = new Intent(this, CoreService.class).setAction(CoreService.ACTION_SHARE);
+        work.putExtra("device", target.device);
+        work.putExtra("label", target.label);
+        if (target.folder != null) work.putExtra("folder", target.folder);
+        if (files.isEmpty()) {
+            work.putExtra("text", text);
+        } else {
+            work.putParcelableArrayListExtra("files", new ArrayList<>(files));
+            // The right to read what was shared goes on to the service.
+            ClipData clip = ClipData.newRawUri("", files.get(0));
+            for (int i = 1; i < files.size(); i++) clip.addItem(new ClipData.Item(files.get(i)));
+            work.setClipData(clip);
+            work.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         }
-    }
-
-    private String nameOf(Uri file) {
-        try (Cursor cursor = getContentResolver().query(file, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) return cursor.getString(0);
-        } catch (Exception ignored) {
-            // Not every source tells the name.
-        }
-        String last = file.getLastPathSegment();
-        return last == null ? "file" : last.substring(last.lastIndexOf('/') + 1);
+        startService(work);
+        done(getString(R.string.share_sending, target.label));
     }
 
     private void done(String message) {

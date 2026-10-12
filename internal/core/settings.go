@@ -29,6 +29,10 @@ type Settings struct {
 	KDEConnect bool `json:"kdeConnect"`
 	// FileAccess lets paired devices browse and change the files here.
 	FileAccess bool `json:"fileAccess"`
+	// Autostart starts perekat in the background when the user logs in.
+	// CanAutostart is false where the system gives no say in it.
+	Autostart    bool `json:"autostart"`
+	CanAutostart bool `json:"canAutostart"`
 	// Colors maps a device id to the colour the window shows it in.
 	Colors map[string]string `json:"colors"`
 }
@@ -62,13 +66,15 @@ func (c *Core) Settings() Settings {
 	c.settingsMu.Lock()
 	defer c.settingsMu.Unlock()
 	s := Settings{
-		Name:        c.links.Self.DeviceName,
-		DownloadDir: c.stored.DownloadDir,
-		Clipboard:   !c.stored.ClipboardOff,
-		Language:    c.stored.Language,
-		KDEConnect:  c.stored.KDEConnectOn,
-		FileAccess:  !c.stored.FileAccessOff,
-		Colors:      map[string]string{},
+		Name:         c.links.Self.DeviceName,
+		DownloadDir:  c.stored.DownloadDir,
+		Clipboard:    !c.stored.ClipboardOff,
+		Language:     c.stored.Language,
+		KDEConnect:   c.stored.KDEConnectOn,
+		FileAccess:   !c.stored.FileAccessOff,
+		Autostart:    desktop.Autostart(),
+		CanAutostart: desktop.CanAutostart,
+		Colors:       map[string]string{},
 	}
 	for id, color := range c.stored.Colors {
 		s.Colors[id] = color
@@ -119,6 +125,11 @@ func (c *Core) SaveSettings(s Settings) error {
 	c.settingsMu.Unlock()
 	if err := os.WriteFile(c.settingsPath(), data, 0o600); err != nil {
 		return err
+	}
+	if desktop.CanAutostart && s.Autostart != desktop.Autostart() {
+		if err := desktop.SetAutostart(s.Autostart); err != nil {
+			return err
+		}
 	}
 	if !s.KDEConnect {
 		c.dropForeignLinks()

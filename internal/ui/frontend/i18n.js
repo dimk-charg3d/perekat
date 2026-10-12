@@ -215,6 +215,8 @@ const texts = {
     searchClose: "Закрыть поиск",
     filterHint: "Фильтр по этой папке. Enter — искать во вложенных.",
     editPath: "Нажмите на пустое место, чтобы ввести путь",
+    autostart: "Запускать вместе с системой",
+    autostartHint: "Перекат стартует в фоне при входе, без окна. Окно открывается из трея или из списка приложений.",
   },
   en: {
     devices: "Devices",
@@ -431,6 +433,8 @@ const texts = {
     searchClose: "Close the search",
     filterHint: "Filters this folder. Enter searches the folders inside.",
     editPath: "Click the empty space to type a path",
+    autostart: "Start with the system",
+    autostartHint: "Perekat starts in the background at login, without a window. Open the window from the tray or the application list.",
   },
 };
 

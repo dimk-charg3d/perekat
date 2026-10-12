@@ -40,3 +40,12 @@ func Trash(path string) error { return os.RemoveAll(path) }
 
 // Roots lists the top-level locations when there is more than one.
 func Roots() []string { return nil }
+
+// CanAutostart is false: on a phone the application itself starts at boot.
+const CanAutostart = false
+
+// Autostart reports whether perekat starts on its own; on a phone it does.
+func Autostart() bool { return true }
+
+// SetAutostart does nothing on a phone.
+func SetAutostart(on bool) error { return nil }
