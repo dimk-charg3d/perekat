@@ -42,6 +42,10 @@ const (
 	TypeNotification = "perekat.notification"
 	// TypeKVM coordinates a mouse and keyboard shared by two computers.
 	TypeKVM = "perekat.kvm"
+	// TypeLock asks a device to lock its screen.
+	TypeLock = "perekat.lock"
+	// TypeNotifyReply answers a message shown in a notification of a phone.
+	TypeNotifyReply = "perekat.notification.reply"
 	// TypeShares lists the network folders a device offers.
 	TypeShares = "perekat.shares"
 )
@@ -54,6 +58,8 @@ var Capabilities = []string{
 	TypeFSRequest,
 	TypeFSResponse,
 	TypeShares,
+	TypeLock,
+	TypeNotifyReply,
 	TypeKVM,
 	TypeNotification,
 	TypeClipImage,

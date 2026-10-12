@@ -92,6 +92,7 @@ func run(ctx context.Context, log *slog.Logger) (restart bool, err error) {
 
 	go c.RunClipboard(ctx)
 	go c.RunInputShare(ctx.Done())
+	go c.RunMenus(ctx.Done())
 	go c.RunBattery(ctx)
 	go c.RunRelay(ctx)
 

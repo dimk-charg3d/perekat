@@ -117,6 +117,7 @@ func (c *Core) handleShare(l *link.Link, p protocol.Packet) {
 		go c.receiveFile(l, body.Filename, p.PayloadSize, p.PayloadTransferInfo.Port)
 	case body.Text != "":
 		c.setClipboard(body.Text)
+		c.rememberClip(body.Text, l.Peer.DeviceName)
 		desktop.Notify(l.Peer.DeviceName, "Текст скопирован в буфер обмена")
 	case body.URL != "":
 		// Only web links are opened; anything else could launch a local program.

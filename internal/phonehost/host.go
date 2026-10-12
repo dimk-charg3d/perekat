@@ -12,11 +12,13 @@ import (
 
 // Event is something the application should do.
 type Event struct {
-	// Type is clipboard, notify or ring.
+	// Type is clipboard, notify, ring, lock or reply.
 	Type  string `json:"type"`
 	Text  string `json:"text,omitempty"`
 	Title string `json:"title,omitempty"`
 	Body  string `json:"body,omitempty"`
+	// Key names the notification a reply is for.
+	Key string `json:"key,omitempty"`
 }
 
 var (

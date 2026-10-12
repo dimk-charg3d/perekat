@@ -56,6 +56,7 @@ const icons = {
   voldown: icon('<path d="M4 9v6h4l5 4V5L8 9zM15 12h5"/>'),
   mute: icon('<path d="M4 9v6h4l5 4V5L8 9zM16 9.500l5 5M21 9.500l-5 5"/>'),
   sync: icon('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),
+  lock: icon('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
   blank: icon(""),
   palette: icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-1.5 1-2 2.2-2H18a3 3 0 0 0 3-3c0-6-4-11-9-11z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/>'),
 };
@@ -164,6 +165,8 @@ function renderSidebar() {
   $("nav-relay").replaceChildren(h("span", { class: "nav-icon", icon: "cloud" }), h("span", { class: "nav-text" }, t("remoteAccess")));
   if (relay && relay.configured) $("nav-relay").append(h("i", { class: "dot" + (relay.connected ? " on" : " bad") }));
   $("nav-relay").classList.toggle("active", view.kind === "relay");
+  $("nav-clip").replaceChildren(h("span", { class: "nav-icon", icon: "paste" }), h("span", { class: "nav-text" }, t("clipTitle")));
+  $("nav-clip").classList.toggle("active", view.kind === "clipboard");
   $("nav-files").replaceChildren(h("span", { class: "nav-icon", icon: "folder" }), h("span", { class: "nav-text" }, t("actBrowse")));
   $("nav-files").classList.toggle("active", view.kind === "files");
   $("nav-settings").replaceChildren(h("span", { class: "nav-icon", icon: "settings" }), h("span", { class: "nav-text" }, t("settings")));
@@ -288,6 +291,7 @@ function renderDevice() {
     );
     tiles.append(tile("sync", t("actSync"), t("actSyncSub"), () => show({ kind: "sync", id: d.id })));
     if (d.canBrowse) tiles.append(tile("folder", t("actBrowse"), t("actBrowseSub"), () => show({ kind: "files", id: d.id, path: "" })));
+    if (d.canLock) tiles.append(tile("lock", t("actLock"), t("actLockSub"), () => run(() => api.Lock(d.id), t("lockSent"))));
     if (d.canRing) tiles.append(tile("ring", t("actRing"), t("actRingSub"), () => run(() => api.Ring(d.id), t("ringSent"))));
     body.append(tiles);
 
@@ -297,6 +301,38 @@ function renderDevice() {
       commands.length
         ? h("div", { class: "chips" }, ...commands.map((c) => h("button", { class: "chip", title: c.command, onclick: () => run(() => api.Run(d.id, c.key), t("commandSent", c.name)) }, c.name)))
         : h("p", { class: "muted small" }, t("noCommands")),
+    );
+  }
+
+  const notes = (state.notes || []).filter((n) => n.deviceId === d.id).slice(0, 12);
+  if (notes.length) {
+    body.append(
+      h("h3", {}, t("notes")),
+      h(
+        "div",
+        { class: "notes" },
+        ...notes.map((n) =>
+          h(
+            "div",
+            { class: "note" },
+            h("div", { class: "note-text" }, h("div", { class: "note-title" }, (n.app && n.app !== n.title ? n.app + " · " : "") + n.title), h("div", { class: "note-body" }, n.text)),
+            h("span", { class: "note-time" }, new Date(n.time).toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" })),
+            n.canReply
+              ? h(
+                  "button",
+                  {
+                    class: "button small",
+                    onclick: async () => {
+                      const out = await ask({ title: n.title, text: n.text, fields: [{ key: "text", label: t("replyText") }], ok: t("replySend") });
+                      if (out && out.text) run(() => api.Reply(d.id, n.key, out.text), t("replySent"));
+                    },
+                  },
+                  t("reply"),
+                )
+              : null,
+          ),
+        ),
+      ),
     );
   }
 
@@ -371,10 +407,21 @@ function updateRelay() {
       h("p", { class: relay.connected ? "good" : "bad" }, h("i", { class: "dot" + (relay.connected ? " on" : " bad") }), relay.connected ? t("relayOn") : t("relayDown")),
       h("p", { class: "muted small" }, t("relayAdd")),
       h("div", { class: "code-line" }, relay.code),
+      h("div", { id: "relay-qr", class: "qr-box" }),
       h("div", { class: "row" }, button(t("copyCode"), "primary", () => run(() => api.Copy(relay.code), t("copied"))), button(t("leave"), "", () => run(() => api.RelayLeave(), t("left")))),
     ),
   );
+  // The code as a picture, for a phone's camera: drawn once per code.
+  if (relayQR.code !== relay.code) {
+    relayQR.code = relay.code;
+    relayQR.node = h("div", { class: "qr-wrap" });
+    qrImage(relay.code)
+      .then((img) => relayQR.node.append(img, h("p", { class: "muted small" }, t("relayQR"))))
+      .catch(() => {});
+  }
+  $("relay-qr").append(relayQR.node);
 }
+const relayQR = { code: "", node: null };
 
 // Settings view, also built once per visit.
 
@@ -499,6 +546,17 @@ async function renderSettings() {
         )
       : null;
 
+  const lockCard =
+    window.Android && window.Android.lockAccess
+      ? h(
+          "div",
+          { class: "card" },
+          h("h2", {}, t("lockTitle")),
+          h("p", { class: "muted small" }, t("lockHint")),
+          h("div", { class: "row" }, h("button", { type: "button", class: "button", onclick: () => window.Android.lockAccess() }, t("lockOpen"))),
+        )
+      : null;
+
   const rows = h("div", { id: "command-rows" }, ...Object.entries(commands).sort().map(([name, command]) => commandRow(name, command)));
   const commandsCard = h(
     "form",
@@ -529,7 +587,7 @@ async function renderSettings() {
     "div",
     { class: "page" },
     h("header", {}, h("span", { class: "head-icon", icon: "settings" }), h("div", { class: "head-text" }, h("h1", {}, t("settings")))),
-    h("div", { class: "body" }, general, phoneCard, commandsCard, quit),
+    h("div", { class: "body" }, general, phoneCard, lockCard, commandsCard, quit),
   );
 }
 
@@ -547,6 +605,8 @@ async function show(next) {
     updateRelay();
   } else if (view.kind === "files") {
     await fmShow(view.id, view.path);
+  } else if (view.kind === "clipboard") {
+    $("view").replaceChildren(renderClips());
   } else if (view.kind === "sync") {
     const d = state.devices.find((x) => x.id === view.id);
     if (!d) return show({ kind: "device", id: view.id });
@@ -629,6 +689,7 @@ document.addEventListener("keydown", (e) => {
 });
 $("refresh").addEventListener("click", () => run(() => api.Refresh()));
 $("nav-files").addEventListener("click", () => show({ kind: "files", id: SELF, path: "" }));
+$("nav-clip").addEventListener("click", () => show({ kind: "clipboard" }));
 $("nav-relay").addEventListener("click", () => show({ kind: "relay" }));
 $("nav-settings").addEventListener("click", () => show({ kind: "settings" }));
 
@@ -647,7 +708,7 @@ $("nav-settings").addEventListener("click", () => show({ kind: "settings" }));
   document.documentElement.lang = language;
   await refresh();
   const first = await api.InitialView();
-  if (first === "relay" || first === "settings") show({ kind: first });
+  if (first === "relay" || first === "settings" || first === "clipboard") show({ kind: first });
   const usable = first === "device" && state && state.devices.find((d) => d.paired && d.connected);
   if (usable) show({ kind: "device", id: usable.id });
   if (first === "files") show({ kind: "files", id: SELF, path: (await api.InitialPath()) || "" });

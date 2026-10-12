@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	qrcode "github.com/skip2/go-qrcode"
+
 	"github.com/charg3d/perekat/internal/core"
 	"github.com/charg3d/perekat/internal/deploy"
 	"github.com/charg3d/perekat/internal/identity"
@@ -134,6 +136,17 @@ func Handler(c *core.Core) http.Handler {
 		}
 		return c.SendInput(device, events)
 	})
+	act("POST /lock", func(device string, _ *http.Request) error { return c.Lock(device) })
+	act("POST /reply", func(device string, r *http.Request) error {
+		var body struct{ Key, Text string }
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return err
+		}
+		return c.Reply(device, body.Key, body.Text)
+	})
+	mux.HandleFunc("GET /notifications", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(c.Notifications())
+	})
 	act("POST /ring", func(device string, _ *http.Request) error { return c.Ring(device) })
 	act("POST /run", func(device string, r *http.Request) error {
 		return c.Run(device, r.URL.Query().Get("command"))
@@ -222,6 +235,34 @@ func Handler(c *core.Core) http.Handler {
 				return
 			}
 		}
+	})
+	clipID := func(r *http.Request) int64 {
+		id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+		return id
+	}
+	mux.HandleFunc("GET /clipboard", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(c.Clips())
+	})
+	mux.HandleFunc("POST /clipboard/use", func(w http.ResponseWriter, r *http.Request) {
+		if err := c.UseClip(clipID(r)); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
+	mux.HandleFunc("POST /clipboard/pin", func(w http.ResponseWriter, r *http.Request) {
+		c.PinClip(clipID(r))
+	})
+	mux.HandleFunc("DELETE /clipboard", func(w http.ResponseWriter, r *http.Request) {
+		c.DropClips(clipID(r))
+	})
+	// qr draws a QR code of a text, for a phone's camera to read.
+	mux.HandleFunc("GET /qr", func(w http.ResponseWriter, r *http.Request) {
+		png, err := qrcode.Encode(r.URL.Query().Get("text"), qrcode.Medium, 512)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(png)
 	})
 	mux.HandleFunc("GET /sync", func(w http.ResponseWriter, r *http.Request) {
 		s, err := c.Sync(r.URL.Query().Get("device"))
@@ -326,7 +367,7 @@ func ServeHTTP(ctx context.Context, ln net.Listener, c *core.Core, token string,
 		given := r.Header.Get("X-Perekat-Token")
 		// A picture or a video is asked for by the page itself, which cannot
 		// add a header, so reading a file may carry the token in the address.
-		if given == "" && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/fs/") {
+		if given == "" && r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/api/fs/") || r.URL.Path == "/api/qr") {
 			given = r.URL.Query().Get("token")
 		}
 		if subtle.ConstantTimeCompare([]byte(given), []byte(token)) != 1 {
@@ -467,6 +508,43 @@ type Paste struct {
 
 func (c *Client) FSPaste(p Paste) error {
 	return c.callBody(http.MethodPost, "/fs/paste", p, nil)
+}
+
+func (c *Client) Lock(device string) error {
+	return c.call(http.MethodPost, "/lock?device="+url.QueryEscape(device), nil)
+}
+
+func (c *Client) Notifications() ([]core.Notification, error) {
+	var out []core.Notification
+	return out, c.call(http.MethodGet, "/notifications", &out)
+}
+
+func (c *Client) Reply(device, key, text string) error {
+	return c.callBody(http.MethodPost, "/reply?device="+url.QueryEscape(device), map[string]string{"key": key, "text": text}, nil)
+}
+
+func (c *Client) Clips() ([]core.ClipEntry, error) {
+	var out []core.ClipEntry
+	return out, c.call(http.MethodGet, "/clipboard", &out)
+}
+
+// ClipAction uses, pins or drops an entry of the clipboard history.
+func (c *Client) ClipAction(action string, id int64) error {
+	method, path := http.MethodPost, "/clipboard/"+action
+	if action == "drop" {
+		method, path = http.MethodDelete, "/clipboard"
+	}
+	return c.call(method, path+"?id="+strconv.FormatInt(id, 10), nil)
+}
+
+// QR returns a QR code of a text as a PNG picture.
+func (c *Client) QR(text string) ([]byte, error) {
+	resp, err := c.http.Get("http://perekat/qr?text=" + url.QueryEscape(text))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }
 
 func (c *Client) Sync(device string) (core.SyncSettings, error) {

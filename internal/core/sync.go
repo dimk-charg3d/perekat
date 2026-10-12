@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
+	"github.com/charg3d/perekat/internal/desktop"
 	"github.com/charg3d/perekat/internal/input"
 	"github.com/charg3d/perekat/internal/link"
 	"github.com/charg3d/perekat/internal/pointer"
@@ -427,5 +429,25 @@ func (c *Core) noteKey(e input.Event) {
 		c.kvm.held[e.Code] = true
 	} else {
 		delete(c.kvm.held, e.Code)
+	}
+}
+
+// RunMenus keeps the file manager's "Send to ... via Perekat" entries in step
+// with the paired devices, until stop is closed.
+func (c *Core) RunMenus(stop <-chan struct{}) {
+	tick := time.NewTicker(5 * time.Second)
+	defer tick.Stop()
+	for {
+		var targets []desktop.SendTarget
+		for _, e := range c.trust.List() {
+			targets = append(targets, desktop.SendTarget{ID: e.ID, Name: e.Name})
+		}
+		sort.Slice(targets, func(i, j int) bool { return targets[i].Name+targets[i].ID < targets[j].Name+targets[j].ID })
+		desktop.SetSendMenu(targets)
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+		}
 	}
 }

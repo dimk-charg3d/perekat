@@ -22,4 +22,8 @@
     <string name="channel_find">Поиск телефона</string>
     <string name="ring_title">Телефон ищут</string>
     <string name="ring_text">Нажмите, чтобы выключить звук</string>
+    <string name="joined">Удалённый доступ подключён</string>
+    <string name="lock_admin">Позволяет сопряжённому компьютеру заблокировать экран этого телефона.</string>
+    <string name="lock_denied">Компьютер просит заблокировать телефон, но блокировка не разрешена в настройках Переката</string>
+    <string name="reply_failed">Ответ не отправлен: уведомление уже закрыто</string>
 </resources>

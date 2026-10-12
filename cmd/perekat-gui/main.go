@@ -4,12 +4,14 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +36,8 @@ type State struct {
 	Devices   []core.DeviceInfo   `json:"devices"`
 	Transfers []core.TransferInfo `json:"transfers"`
 	Relay     core.RelayStatus    `json:"relay"`
+	// Notes are the recent notifications of the phones.
+	Notes []core.Notification `json:"notes"`
 }
 
 // App is the set of calls available to the window's scripts.
@@ -65,7 +69,8 @@ func (a *App) State() (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	return State{Self: self, Devices: devices, Transfers: transfers, Relay: relay}, nil
+	notes, _ := a.client.Notifications()
+	return State{Self: self, Devices: devices, Transfers: transfers, Relay: relay, Notes: notes}, nil
 }
 
 // RelaySetup installs a relay server on the user's own machine and joins it.
@@ -107,6 +112,28 @@ func (a *App) FS(id string, req core.FSRequest) (core.FSResult, error) {
 // FSPaste copies or moves files into a folder, on the same device or another.
 func (a *App) FSPaste(src string, paths []string, dst, dir string, move bool) error {
 	return a.client.FSPaste(ipc.Paste{Src: src, Paths: paths, Dst: dst, Dir: dir, Move: move})
+}
+
+// Lock asks a device to lock its screen.
+func (a *App) Lock(id string) error { return a.client.Lock(id) }
+
+// Reply answers a message shown in a notification of a phone.
+func (a *App) Reply(id, key, text string) error { return a.client.Reply(id, key, text) }
+
+// Clips returns the clipboard history, newest first.
+func (a *App) Clips() ([]core.ClipEntry, error) { return a.client.Clips() }
+
+// ClipAction uses, pins or drops an entry of the clipboard history; the id
+// travels as text, being too long for a script's number.
+func (a *App) ClipAction(action, id string) error {
+	n, _ := strconv.ParseInt(id, 10, 64)
+	return a.client.ClipAction(action, n)
+}
+
+// QR returns a QR code of a text as a picture to put into the page.
+func (a *App) QR(text string) (string, error) {
+	png, err := a.client.QR(text)
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), err
 }
 
 // Sync returns what is shared with a device.
@@ -195,6 +222,21 @@ func (a *App) RemoteOff() error { return a.client.RemoteOff() }
 
 func (a *App) Quit() { runtime.Quit(a.ctx) }
 
+// onReply is set once the window exists; the daemon calls it through.
+var onReply func(deviceID string)
+
+func init() {
+	app.Extra = func(ctx context.Context, c *core.Core) error {
+		c.OnReply = func(id string) {
+			if onReply != nil {
+				onReply(id)
+			}
+		}
+		<-ctx.Done()
+		return nil
+	}
+}
+
 // stopped is closed when the daemon inside this process has shut down.
 var stopped = make(chan struct{})
 
@@ -274,6 +316,12 @@ func main() {
 		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
 		OnStartup: func(ctx context.Context) {
 			a.ctx = ctx
+			// "Reply" on a notification brings the window up on that phone.
+			onReply = func(id string) {
+				runtime.WindowUnminimise(ctx)
+				runtime.Show(ctx)
+				runtime.WindowExecJS(ctx, fmt.Sprintf("show({ kind: 'device', id: %q })", id))
+			}
 			startTray(a)
 		},
 		// Closing the window keeps perekat running; launching it again brings

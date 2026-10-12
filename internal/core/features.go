@@ -17,6 +17,7 @@ import (
 	"github.com/charg3d/perekat/internal/desktop"
 	"github.com/charg3d/perekat/internal/input"
 	"github.com/charg3d/perekat/internal/link"
+	"github.com/charg3d/perekat/internal/phonehost"
 	"github.com/charg3d/perekat/internal/protocol"
 )
 
@@ -62,6 +63,7 @@ func (c *Core) localClipboard(text string, initial bool) {
 	if initial {
 		return
 	}
+	c.rememberClip(text, c.links.Self.DeviceName)
 	for _, l := range c.pairedLinks() {
 		if accepts(l.Peer, protocol.TypeClipboard) && !c.peerSync(l.Peer.DeviceID).ClipboardOff {
 			send(l, protocol.TypeClipboard, clipboardBody{Content: text})
@@ -132,6 +134,7 @@ func (c *Core) handleClipboard(l *link.Link, p protocol.Packet) {
 		}
 	}
 	c.setClipboard(body.Content)
+	c.rememberClip(body.Content, l.Peer.DeviceName)
 }
 
 // setClipboard applies text received from another device. Recording it first
@@ -374,12 +377,49 @@ func (c *Core) SendInput(query string, events []input.Event) error {
 	return nil
 }
 
-// Notification is a notification shown on this device, passed on to the
+// Lock asks a device to lock its screen.
+func (c *Core) Lock(query string) error {
+	l, err := c.pairedLink(query)
+	if err != nil {
+		return err
+	}
+	if !accepts(l.Peer, protocol.TypeLock) {
+		return errors.New("device cannot be locked from here")
+	}
+	return send(l, protocol.TypeLock, struct{}{})
+}
+
+// Notification is a notification shown on a phone, passed on to the
 // computers so that it is seen there too.
 type Notification struct {
+	// Key tells notifications apart on the phone that showed them.
+	Key   string `json:"key,omitempty"`
 	App   string `json:"app"`
 	Title string `json:"title"`
 	Text  string `json:"text"`
+	// CanReply is set when the notification is a message that can be answered.
+	CanReply bool `json:"canReply,omitempty"`
+	// Call marks a phone call; End says it is over, or that a notification
+	// was dismissed on the phone.
+	Call bool `json:"call,omitempty"`
+	End  bool `json:"end,omitempty"`
+
+	// Filled in on the computer that received it.
+	DeviceID string `json:"deviceId,omitempty"`
+	Device   string `json:"device,omitempty"`
+	Time     int64  `json:"time,omitempty"`
+}
+
+// notifyKept is how many notifications of the phones are remembered.
+const notifyKept = 60
+
+type notifications struct {
+	sync.Mutex
+	list []Notification // newest first
+	// paused are the players stopped for a phone call, and resume the timer
+	// that starts them again once the call is over.
+	paused []string
+	resume *time.Timer
 }
 
 // Notified sends a notification of this device to the paired computers.
@@ -391,14 +431,105 @@ func (c *Core) Notified(n Notification) {
 	}
 }
 
+// Notifications lists the recent notifications of the phones, newest first.
+func (c *Core) Notifications() []Notification {
+	c.notes.Lock()
+	defer c.notes.Unlock()
+	return append([]Notification{}, c.notes.list...)
+}
+
 func (c *Core) handleNotification(l *link.Link, p protocol.Packet) {
 	var n Notification
-	if err := json.Unmarshal(p.Body, &n); err != nil || (n.Title == "" && n.Text == "") || c.peerSync(l.Peer.DeviceID).NotifyOff {
+	if err := json.Unmarshal(p.Body, &n); err != nil || c.peerSync(l.Peer.DeviceID).NotifyOff {
 		return
 	}
+	n.DeviceID, n.Device, n.Time = l.Peer.DeviceID, l.Peer.DeviceName, time.Now().UnixMilli()
+	same := func(x Notification) bool { return x.DeviceID == n.DeviceID && x.Key == n.Key && n.Key != "" }
+
+	c.notes.Lock()
+	kept := c.notes.list[:0:0]
+	for _, x := range c.notes.list {
+		if !same(x) {
+			kept = append(kept, x)
+		}
+	}
+	if n.End {
+		c.notes.list = kept
+		if n.Call {
+			// Music comes back a moment after the call, unless the phone
+			// only swapped one call notification for another.
+			paused := c.notes.paused
+			c.notes.resume = time.AfterFunc(2*time.Second, func() {
+				c.notes.Lock()
+				c.notes.paused, c.notes.resume = nil, nil
+				c.notes.Unlock()
+				desktop.ResumeMedia(paused)
+			})
+		}
+		c.notes.Unlock()
+		return
+	}
+	if n.Title == "" && n.Text == "" {
+		c.notes.Unlock()
+		return
+	}
+	if !n.Call {
+		c.notes.list = append([]Notification{n}, kept...)
+		if len(c.notes.list) > notifyKept {
+			c.notes.list = c.notes.list[:notifyKept]
+		}
+	}
+	ringing := n.Call && c.notes.resume == nil && c.notes.paused == nil
+	if n.Call && c.notes.resume != nil {
+		c.notes.resume.Stop()
+		c.notes.resume = nil
+	}
+	c.notes.Unlock()
+
 	title := n.Title
 	if n.App != "" && n.App != n.Title {
 		title = n.App + ": " + n.Title
 	}
-	desktop.Notify(title+" · "+l.Peer.DeviceName, n.Text)
+	switch {
+	case n.Call:
+		if !ringing {
+			return
+		}
+		paused := desktop.PauseMedia()
+		c.notes.Lock()
+		c.notes.paused = paused
+		c.notes.Unlock()
+		desktop.Notify("Звонок · "+n.Device, strings.TrimSpace(n.Title+"\n"+n.Text))
+	case n.CanReply:
+		go func() {
+			if desktop.NotifyAction(title+" · "+n.Device, n.Text, "Ответить") && c.OnReply != nil {
+				c.OnReply(n.DeviceID)
+			}
+		}()
+	default:
+		desktop.Notify(title+" · "+n.Device, n.Text)
+	}
+}
+
+// Reply answers a message shown in a notification of a phone.
+func (c *Core) Reply(query, key, text string) error {
+	l, err := c.pairedLink(query)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("nothing to send")
+	}
+	if !accepts(l.Peer, protocol.TypeNotifyReply) {
+		return errors.New("device cannot send replies")
+	}
+	return send(l, protocol.TypeNotifyReply, map[string]string{"key": key, "text": text})
+}
+
+// handleNotifyReply hands a reply typed on a computer to the application.
+func (c *Core) handleNotifyReply(p protocol.Packet) {
+	var body struct{ Key, Text string }
+	if json.Unmarshal(p.Body, &body) == nil && body.Key != "" && body.Text != "" {
+		phonehost.Push(phonehost.Event{Type: "reply", Key: body.Key, Text: body.Text})
+	}
 }

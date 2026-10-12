@@ -85,6 +85,8 @@ type DeviceInfo struct {
 	CanRemote bool `json:"canRemote,omitempty"`
 	// CanBrowse is set when the device's files can be browsed.
 	CanBrowse bool `json:"canBrowse,omitempty"`
+	// CanLock is set when the device can be asked to lock its screen.
+	CanLock bool `json:"canLock,omitempty"`
 	// CanRing is set when the device can be asked to play a sound.
 	CanRing  bool      `json:"canRing,omitempty"`
 	Commands []Command `json:"commands,omitempty"`
@@ -126,6 +128,9 @@ type Core struct {
 
 	// OnRefresh, if set, is called to look for devices again.
 	OnRefresh func()
+	// OnReply, if set, is called when the user asks to answer a message of
+	// a phone: the window opens on that phone.
+	OnReply func(deviceID string)
 	// OnRestart, if set, is called to restart the daemon.
 	OnRestart func()
 
@@ -139,6 +144,8 @@ type Core struct {
 	relayCtx context.Context
 	relay    *relaySession
 
+	clips    clipHistory
+	notes    notifications
 	clipMu   sync.Mutex
 	clip     string
 	clipTime int64 // when clip was set, in milliseconds; zero if unknown
@@ -326,6 +333,11 @@ func (c *Core) readLoop(l *link.Link) {
 			c.handleNotification(l, p)
 		case protocol.TypeKVM:
 			c.handleKVM(l, p)
+		case protocol.TypeLock:
+			c.log.Info("asked to lock", "device", l.Peer.DeviceName)
+			go desktop.Lock()
+		case protocol.TypeNotifyReply:
+			c.handleNotifyReply(p)
 		default:
 			c.log.Debug("unhandled packet", "device", l.Peer.DeviceName, "type", p.Type)
 		}
@@ -492,6 +504,7 @@ func (c *Core) info(id string, d *device) DeviceInfo {
 		CanRemote:  paired && accepts(d.identity, protocol.TypeInput),
 		CanBrowse:  paired && accepts(d.identity, protocol.TypeFSRequest),
 		CanRing:    paired && accepts(d.identity, protocol.TypeRing),
+		CanLock:    paired && accepts(d.identity, protocol.TypeLock),
 		Commands:   d.commands,
 		Battery:    d.battery,
 		Shares:     d.shares,

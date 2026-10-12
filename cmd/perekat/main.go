@@ -20,6 +20,7 @@ import (
 	"github.com/charg3d/perekat/internal/app"
 	"github.com/charg3d/perekat/internal/core"
 	"github.com/charg3d/perekat/internal/deploy"
+	"github.com/charg3d/perekat/internal/desktop"
 	"github.com/charg3d/perekat/internal/ipc"
 	"github.com/charg3d/perekat/internal/phone"
 	"github.com/charg3d/perekat/internal/ui"
@@ -224,6 +225,30 @@ func withClient(do func(*ipc.Client) error) error {
 }
 
 func send(device string, files []string) error {
+	// -notify reports the outcome on the desktop: for a start from a menu,
+	// where nobody reads what is printed.
+	if device == "-notify" && len(files) >= 2 {
+		device, files = files[0], files[1:]
+		err := send(device, files)
+		name := device
+		if withClient(func(c *ipc.Client) error {
+			list, err := c.Devices()
+			for _, d := range list {
+				if d.ID == device {
+					name = d.Name
+				}
+			}
+			return err
+		}) != nil {
+			name = device
+		}
+		if err != nil {
+			desktop.Notify("Не отправлено на "+name, err.Error())
+		} else {
+			desktop.Notify("Перекат", fmt.Sprintf("Отправлено на %s: %d", name, len(files)))
+		}
+		return err
+	}
 	// The daemon opens the files itself, possibly from another directory.
 	for i, f := range files {
 		abs, err := filepath.Abs(f)

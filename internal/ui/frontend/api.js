@@ -33,8 +33,8 @@ function httpApi() {
     // web marks the calls that have no window behind them.
     web: true,
     async State() {
-      const [self, devices, transfers, relay] = await Promise.all([call("GET", "/self"), call("GET", "/devices"), call("GET", "/transfers"), call("GET", "/relay")]);
-      return { self, devices, transfers, relay };
+      const [self, devices, transfers, relay, notes] = await Promise.all([call("GET", "/self"), call("GET", "/devices"), call("GET", "/transfers"), call("GET", "/relay"), call("GET", "/notifications")]);
+      return { self, devices, transfers, relay, notes };
     },
     Pair: (id) => call("POST", "/pair" + of(id)),
     Unpair: (id) => call("POST", "/unpair" + of(id)),
@@ -55,6 +55,11 @@ function httpApi() {
     Input: (id, events) => call("POST", "/input" + of(id), events),
     FS: (id, request) => call("POST", "/fs" + of(id), request),
     FSPaste: (src, paths, dst, dir, move) => call("POST", "/fs/paste", { src, paths, dst, dir, move }),
+    Lock: (id) => call("POST", "/lock" + of(id)),
+    Reply: (id, key, text) => call("POST", "/reply" + of(id), { key, text }),
+    Clips: () => call("GET", "/clipboard"),
+    ClipAction: (action, id) => (action === "drop" ? call("DELETE", "/clipboard?id=" + id) : call("POST", "/clipboard/" + action + "?id=" + id)),
+    QR: async (text) => "/api/qr?text=" + encodeURIComponent(text) + "&token=" + encodeURIComponent(token),
     Sync: (id) => call("GET", "/sync" + of(id)),
     SaveSync: (id, settings) => call("PUT", "/sync" + of(id), settings),
     Version: () => call("GET", "/version"),

@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(web);
         openWhenReady();
+        joinFromLink(getIntent());
 
         getSystemService(ClipboardManager.class).addPrimaryClipChangedListener(copied);
     }
@@ -68,9 +69,28 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        joinFromLink(intent);
         if ("files".equals(intent.getStringExtra("view"))) {
             web.evaluateJavascript("show({ kind: 'files', id: 'self', path: '' })", null);
         }
+    }
+
+    /** A perekat:// link, read from a QR code, connects this phone to remote access. */
+    private void joinFromLink(Intent intent) {
+        Uri link = intent.getData();
+        if (link == null || !"perekat".equals(link.getScheme())) return;
+        String code = link.toString();
+        new Thread(() -> {
+            String result = getString(R.string.joined);
+            try {
+                if (!CoreService.waitReady(8000)) throw new Exception(getString(R.string.not_ready));
+                CoreService.call("POST", "relay/join", org.json.JSONObject.quote(code), 20000);
+            } catch (Exception e) {
+                result = String.valueOf(e.getMessage());
+            }
+            String message = result;
+            runOnUiThread(() -> android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show());
+        }).start();
     }
 
     /** Loads the interface as soon as the daemon reports where it is. */
@@ -157,6 +177,15 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void notificationAccess() {
             main.post(() -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        }
+
+        /** Asks for the right to lock the screen on a computer's request. */
+        @JavascriptInterface
+        public void lockAccess() {
+            main.post(() -> startActivity(new Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                    .putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                            new android.content.ComponentName(MainActivity.this, LockAdmin.class))
+                    .putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION, getString(R.string.lock_admin))));
         }
 
         @JavascriptInterface

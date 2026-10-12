@@ -49,3 +49,18 @@ func Autostart() bool { return true }
 
 // SetAutostart does nothing on a phone.
 func SetAutostart(on bool) error { return nil }
+
+// Lock asks the application to lock the phone.
+func Lock() error {
+	phonehost.Push(phonehost.Event{Type: "lock"})
+	return nil
+}
+
+// PauseMedia does nothing on a phone.
+func PauseMedia() []string { return nil }
+
+// ResumeMedia does nothing on a phone.
+func ResumeMedia(names []string) {}
+
+// NotifyAction is not used on a phone.
+func NotifyAction(title, body, button string) bool { return false }

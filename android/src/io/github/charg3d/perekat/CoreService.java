@@ -5,6 +5,8 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -379,11 +381,32 @@ public class CoreService extends Service {
                     case "ring":
                         main.post(this::ring);
                         break;
+                    case "lock":
+                        DevicePolicyManager policy = getSystemService(DevicePolicyManager.class);
+                        if (policy.isAdminActive(new ComponentName(this, LockAdmin.class))) policy.lockNow();
+                        else tell(getString(R.string.lock_denied));
+                        break;
+                    case "reply":
+                        if (!NotifyRelay.reply(event.optString("key"), event.optString("text"))) tell(getString(R.string.reply_failed));
+                        break;
                 }
             } catch (Exception e) {
                 sleep(1000);
             }
         }
+    }
+
+    /** Shows a short note about something that could not be done. */
+    private void tell(String text) {
+        getSystemService(NotificationManager.class).notify(nextNotification++,
+                new Notification.Builder(this, CHANNEL_EVENTS)
+                        .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+                        .setContentTitle(getString(R.string.app_name))
+                        .setContentText(text)
+                        .setStyle(new Notification.BigTextStyle().bigText(text))
+                        .setContentIntent(openApp())
+                        .setAutoCancel(true)
+                        .build());
     }
 
     private MediaPlayer ringing;
