@@ -882,7 +882,6 @@ function drawTabs() {
           },
         }),
       );
-      if (tab.dev) tinted(node, tab.dev === SELF ? state.self.deviceId : tab.dev);
       return node;
     }),
     iconButton("plus", t("newTab"), () => addTab(fm.dev, fm.res ? fm.res.path : "")),
@@ -1065,8 +1064,8 @@ function drawPlaces() {
   }
 
   out.push(h("div", { class: "fm-places-head" }, t("devices")));
-  out.push(tinted(placeButton(state.self.deviceType === "phone" ? "phone" : "desktop", t("thisDeviceShort", state.self.deviceName), fm.dev === SELF, () => fmGo(SELF, ""), null, { dev: SELF, dir: "" }), state.self.deviceId));
-  for (const d of state.devices) if (d.connected && d.canBrowse) out.push(tinted(placeButton(d.type, d.name, fm.dev === d.id, () => fmGo(d.id, ""), null, { dev: d.id, dir: "" }), d.id));
+  out.push(placeButton(state.self.deviceType === "phone" ? "phone" : "desktop", t("thisDeviceShort", state.self.deviceName), fm.dev === SELF, () => fmGo(SELF, ""), null, { dev: SELF, dir: "" }));
+  for (const d of state.devices) if (d.connected && d.canBrowse) out.push(placeButton(d.type, d.name, fm.dev === d.id, () => fmGo(d.id, ""), null, { dev: d.id, dir: "" }));
 
   if (fm.recents.length) {
     out.push(h("div", { class: "fm-places-head" }, t("recents")));
@@ -1263,7 +1262,6 @@ function drawStatus() {
 
 function drawPane() {
   if (!fm.root || !fm.res) return;
-  tinted(fm.root, fm.dev === SELF ? state.self.deviceId : fm.dev);
   fm.root.classList.toggle("selecting", fm.selecting);
   drawBar();
   drawContent();

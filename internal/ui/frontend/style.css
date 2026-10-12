@@ -371,7 +371,9 @@ input.cmd-name { flex: 0 0 30%; }
 
 .back-home { display: none; }
 
-/* File manager */
+/* File manager. It is grey throughout: the colours of the devices stay
+   outside, here nothing competes with the files. */
+.fm, .fm-preview, .fm-menu, .fm-dialog-back, .fm-band { --accent: #aab1b9; --on-accent: #16181a; }
 .fm-tabs { display: flex; align-items: center; gap: 4px; padding: 8px 10px 0; overflow-x: auto; scrollbar-width: none; }
 .fm-tabs[hidden] { display: none; }
 .fm-tabs::-webkit-scrollbar { display: none; }
@@ -392,7 +394,7 @@ input.cmd-name { flex: 0 0 30%; }
 .fm-tab:hover { background: var(--card); }
 .fm-tab.shown { color: var(--text); }
 .fm-tab.active { background: var(--card); color: var(--text); box-shadow: inset 0 2px 0 var(--accent); }
-.fm-tab-icon { display: grid; color: var(--accent); }
+.fm-tab-icon { display: grid; color: var(--muted); }
 .fm-tab-icon svg { width: 15px; height: 15px; }
 .fm-tab-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fm-tab-close { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; opacity: 0.5; }
@@ -456,7 +458,7 @@ input.cmd-name { flex: 0 0 30%; }
 }
 .fm-crumb:hover { background: var(--hover); color: var(--text); }
 .fm-crumb.last { color: var(--text); font-weight: 600; }
-.fm-crumb.of-device { color: var(--accent); font-weight: 600; }
+.fm-crumb.of-device { color: var(--text); font-weight: 600; }
 .fm-crumb-icon { display: grid; }
 .fm-crumb-icon svg { width: 15px; height: 15px; }
 .fm-crumb-sep { color: #555c63; flex: none; }
@@ -495,7 +497,7 @@ input.cmd-name { flex: 0 0 30%; }
 }
 .fm-place:hover { background: var(--hover); }
 .fm-place.active { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
-.fm-place-icon { display: grid; flex: none; color: var(--accent); }
+.fm-place-icon { display: grid; flex: none; color: var(--muted); }
 .fm-place-icon svg { width: 17px; height: 17px; }
 .fm-place-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -508,10 +510,10 @@ input.cmd-name { flex: 0 0 30%; }
 .fm-col.right { text-align: right; }
 .fm-row { height: 34px; border-radius: 8px; }
 .fm-row:hover, .fm-tile:hover { background: var(--card); }
-.fm-row.sel, .fm-tile.sel { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.fm-row.sel, .fm-tile.sel { background: #30353b; box-shadow: inset 0 0 0 1px #474e56; }
 .fm-icon { display: grid; place-items: center; color: var(--muted); }
 .fm-icon.k-folder { color: var(--accent); }
-.fm-icon.k-folder svg { fill: color-mix(in srgb, var(--accent) 25%, transparent); }
+.fm-icon.k-folder svg { fill: color-mix(in srgb, var(--accent) 18%, transparent); }
 .fm-row .fm-icon svg { width: 20px; height: 20px; }
 .fm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fm-meta { font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
