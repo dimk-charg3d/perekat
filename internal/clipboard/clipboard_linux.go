@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !phone
 
 // Package clipboard watches and sets the text clipboard.
 package clipboard

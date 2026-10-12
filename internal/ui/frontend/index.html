@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Перекат</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <aside>
+      <div class="brand">
+        <svg viewBox="0 0 128 128" aria-hidden="true">
+          <rect x="18" y="34" width="52" height="38" rx="6" fill="none" stroke="currentColor" stroke-width="8"/>
+          <path d="M30 88h28" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+          <rect x="80" y="50" width="30" height="48" rx="6" fill="#8b939b"/>
+          <path d="M58 24c18-8 36 0 42 14" fill="none" stroke="#8b939b" stroke-width="8" stroke-linecap="round"/>
+          <path d="M104 20v20H84" fill="none" stroke="#8b939b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Перекат</span>
+      </div>
+
+      <div class="side-head">
+        <span id="devices-label"></span>
+        <button id="refresh" class="icon-button"></button>
+      </div>
+      <nav id="device-list"></nav>
+      <p id="no-devices" class="side-empty" hidden></p>
+
+      <div class="side-bottom">
+        <button id="nav-relay" class="nav"></button>
+        <button id="nav-settings" class="nav"></button>
+        <p id="self" class="self"></p>
+      </div>
+    </aside>
+
+    <main id="view"></main>
+  </div>
+
+  <div id="toasts"></div>
+
+  <div id="remote" class="overlay" hidden>
+    <div class="overlay-card">
+      <div class="pulse"></div>
+      <h2 id="remote-title"></h2>
+      <p id="remote-text"></p>
+      <p id="remote-hint" class="muted"></p>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

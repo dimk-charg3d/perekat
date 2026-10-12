@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/charg3d/perekat/internal/protocol"
@@ -90,6 +92,68 @@ func (s *Service) Run(ctx context.Context, peers chan<- Peer) error {
 
 var errSelf = errors.New("own announcement")
 
+// SameHost reports whether ip belongs to this machine. Another program that
+// speaks the protocol here, such as KDE Connect, would otherwise show up as a
+// second device with this machine's name, and linking to it is pointless.
+//
+// PEREKAT_SAME_HOST turns the check off, to try several instances on one machine.
+func SameHost(ip net.IP) bool {
+	if ip == nil || os.Getenv("PEREKAT_SAME_HOST") != "" {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	for _, n := range localNets() {
+		if n.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	netsMu     sync.Mutex
+	hostNets   []*net.IPNet
+	hostNetsOK bool
+)
+
+// SetLocalNets tells discovery which addresses this device has. Android does
+// not let a program list its own network interfaces, so the application
+// around the daemon reports them instead.
+func SetLocalNets(nets []*net.IPNet) {
+	netsMu.Lock()
+	defer netsMu.Unlock()
+	hostNets, hostNetsOK = nets, true
+}
+
+// localNets returns the addresses of this device with their network masks.
+func localNets() []*net.IPNet {
+	netsMu.Lock()
+	nets, ok := hostNets, hostNetsOK
+	netsMu.Unlock()
+	if ok {
+		return nets
+	}
+	ifaces, _ := net.Interfaces()
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok {
+				// A network that cannot broadcast is marked by having no mask.
+				if iface.Flags&net.FlagBroadcast == 0 || iface.Flags&net.FlagLoopback != 0 {
+					ipnet = &net.IPNet{IP: ipnet.IP}
+				}
+				nets = append(nets, ipnet)
+			}
+		}
+	}
+	return nets
+}
+
 func (s *Service) parse(data []byte, from net.Addr) (Peer, error) {
 	p, err := protocol.Decode(data)
 	if err != nil {
@@ -99,7 +163,7 @@ func (s *Service) parse(data []byte, from net.Addr) (Peer, error) {
 	if err != nil {
 		return Peer{}, err
 	}
-	if id.DeviceID == s.Self.DeviceID {
+	if id.DeviceID == s.Self.DeviceID || SameHost(from.(*net.UDPAddr).IP) {
 		return Peer{}, errSelf
 	}
 	if id.TCPPort == 0 {
@@ -153,27 +217,16 @@ func (s *Service) announce(pc net.PacketConn) error {
 // network, falling back to the limited broadcast address when none is found.
 func broadcastAddrs() []net.IP {
 	var out []net.IP
-	ifaces, _ := net.Interfaces()
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagBroadcast == 0 || iface.Flags&net.FlagLoopback != 0 {
+	for _, ipnet := range localNets() {
+		ip := ipnet.IP.To4()
+		if ip == nil || len(ipnet.Mask) != net.IPv4len {
 			continue
 		}
-		addrs, _ := iface.Addrs()
-		for _, a := range addrs {
-			ipnet, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			ip := ipnet.IP.To4()
-			if ip == nil || len(ipnet.Mask) != net.IPv4len {
-				continue
-			}
-			bcast := make(net.IP, net.IPv4len)
-			for i := range ip {
-				bcast[i] = ip[i] | ^ipnet.Mask[i]
-			}
-			out = append(out, bcast)
+		bcast := make(net.IP, net.IPv4len)
+		for i := range ip {
+			bcast[i] = ip[i] | ^ipnet.Mask[i]
 		}
+		out = append(out, bcast)
 	}
 	if len(out) == 0 {
 		out = append(out, net.IPv4bcast)

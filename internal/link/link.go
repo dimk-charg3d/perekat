@@ -39,15 +39,24 @@ type Link struct {
 	Cert *x509.Certificate
 	// Dialed is set when this side opened the connection.
 	Dialed bool
+	// Relayed is set when the connection passes through a relay server
+	// rather than going straight to the device.
+	Relayed bool
+	// Payload opens the side connections that carry files for this link.
+	Payload PayloadTransport
 
 	conn *tls.Conn
 	r    *bufio.Reader
 	wmu  sync.Mutex
 }
 
+// keepAlive notices a peer that vanished (a laptop that left the network)
+// within about twenty seconds, so a link through the relay can replace it.
+var keepAlive = net.KeepAliveConfig{Enable: true, Idle: 10 * time.Second, Interval: 3 * time.Second, Count: 3}
+
 // Listen opens the first free TCP port of the KDE Connect range.
 func Listen(ctx context.Context) (net.Listener, int, error) {
-	var lc net.ListenConfig
+	lc := net.ListenConfig{KeepAliveConfig: keepAlive}
 	var lastErr error
 	for port := protocol.DefaultPort; port <= protocol.MaxPort; port++ {
 		ln, err := lc.Listen(ctx, "tcp4", ":"+strconv.Itoa(port))
@@ -62,11 +71,16 @@ func Listen(ctx context.Context) (net.Listener, int, error) {
 // Dial connects to a device that announced itself and expects it to prove the
 // same device id over the encrypted channel.
 func (c Config) Dial(ctx context.Context, ip net.IP, announced protocol.Identity) (*Link, error) {
-	d := net.Dialer{Timeout: handshakeTimeout}
+	d := net.Dialer{Timeout: handshakeTimeout, KeepAliveConfig: keepAlive}
 	conn, err := d.DialContext(ctx, "tcp4", net.JoinHostPort(ip.String(), strconv.Itoa(announced.TCPPort)))
 	if err != nil {
 		return nil, err
 	}
+	return c.DialConn(conn, announced)
+}
+
+// DialConn runs the dialling side of the handshake over an open connection.
+func (c Config) DialConn(conn net.Conn, announced protocol.Identity) (*Link, error) {
 	conn.SetDeadline(time.Now().Add(handshakeTimeout))
 	if err := c.writeIdentity(conn); err != nil {
 		conn.Close()
@@ -141,7 +155,9 @@ func (c Config) secure(tc *tls.Conn, expectID string) (*Link, error) {
 		return fail(fmt.Errorf("certificate is for %q, not %s", certs[0].Subject.CommonName, peer.DeviceID))
 	}
 	tc.SetDeadline(time.Time{})
-	return &Link{Peer: peer, Cert: certs[0], conn: tc, r: r}, nil
+	l := &Link{Peer: peer, Cert: certs[0], conn: tc, r: r}
+	l.Payload = directPayload{l}
+	return l, nil
 }
 
 func (c Config) writeIdentity(conn net.Conn) error {
@@ -231,9 +247,13 @@ func (l *Link) Receive() (protocol.Packet, error) {
 	}
 }
 
-// RemoteIP returns the address of the peer.
+// RemoteIP returns the address the link is connected to: the peer itself, or
+// the relay server for a relayed link.
 func (l *Link) RemoteIP() net.IP {
-	return l.conn.RemoteAddr().(*net.TCPAddr).IP
+	if addr, ok := l.conn.RemoteAddr().(*net.TCPAddr); ok {
+		return addr.IP
+	}
+	return nil
 }
 
 func (l *Link) Close() error {

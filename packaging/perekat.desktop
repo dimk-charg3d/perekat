@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Перекат
+GenericName=Связь устройств
+Comment=Буфер обмена, файлы и управление между компьютерами и телефоном
+Exec=@BINDIR@/perekat-gui
+Icon=perekat
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=perekat-gui

@@ -18,8 +18,17 @@ type Device struct {
 	Type string `json:"type"`
 }
 
+var dirOverride string
+
+// SetDir fixes the configuration directory, for systems that have no
+// per-user one, such as Android.
+func SetDir(dir string) { dirOverride = dir }
+
 // Dir returns the per-user configuration directory of perekat.
 func Dir() (string, error) {
+	if dirOverride != "" {
+		return dirOverride, nil
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -47,17 +56,19 @@ func LoadOrCreate(dir string) (Device, error) {
 		name = "perekat"
 	}
 	d := Device{ID: newID(), Name: name, Type: "desktop"}
-	data, err = json.MarshalIndent(d, "", "  ")
+	return d, Save(dir, d)
+}
+
+// Save writes the identity to dir.
+func Save(dir string, d Device) error {
+	data, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
-		return Device{}, err
+		return err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return Device{}, err
+		return err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return Device{}, err
-	}
-	return d, nil
+	return os.WriteFile(filepath.Join(dir, "identity.json"), data, 0o600)
 }
 
 // newID returns a random UUIDv4 with underscores, the form protocol version 8 expects.

@@ -4,11 +4,11 @@ package main
 
 import (
 	"context"
-	"embed"
+	"flag"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
@@ -18,25 +18,30 @@ import (
 
 	"github.com/charg3d/perekat/internal/app"
 	"github.com/charg3d/perekat/internal/core"
+	"github.com/charg3d/perekat/internal/deploy"
 	"github.com/charg3d/perekat/internal/ipc"
 	"github.com/charg3d/perekat/internal/protocol"
+	"github.com/charg3d/perekat/internal/ui"
 )
-
-//go:embed all:frontend
-var embedded embed.FS
 
 // State is everything the window shows.
 type State struct {
 	Self      protocol.Identity   `json:"self"`
 	Devices   []core.DeviceInfo   `json:"devices"`
 	Transfers []core.TransferInfo `json:"transfers"`
+	Relay     core.RelayStatus    `json:"relay"`
 }
 
 // App is the set of calls available to the window's scripts.
 type App struct {
 	ctx    context.Context
 	client *ipc.Client
+	view   string
 }
+
+// InitialView names the page the window opens on: "", "relay", "settings" or
+// "files" for the file browser of the first device that has one.
+func (a *App) InitialView() string { return a.view }
 
 func (a *App) State() (State, error) {
 	self, err := a.client.Self()
@@ -51,16 +56,72 @@ func (a *App) State() (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	return State{Self: self, Devices: devices, Transfers: transfers}, nil
+	relay, err := a.client.RelayStatus()
+	if err != nil {
+		return State{}, err
+	}
+	return State{Self: self, Devices: devices, Transfers: transfers, Relay: relay}, nil
 }
 
-// SendFiles asks which files to send and delivers them to the device.
-func (a *App) SendFiles(id string) error {
-	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{Title: "Отправить файлы"})
-	if err != nil || len(paths) == 0 {
+// RelaySetup installs a relay server on the user's own machine and joins it.
+// address is host or host:port, as for SSH.
+func (a *App) RelaySetup(address, user, password string) error {
+	target, err := deploy.ParseTarget(strings.TrimSpace(address))
+	if err != nil {
 		return err
 	}
-	return a.client.Send(id, paths)
+	if user = strings.TrimSpace(user); user != "" {
+		target.User = user
+	}
+	target.Password = password
+	return a.client.RelaySetup(target)
+}
+
+func (a *App) RelayJoin(code string) error { return a.client.RelayJoin(code) }
+
+func (a *App) RelayLeave() error { return a.client.RelayLeave() }
+
+// Copy puts text into the clipboard.
+func (a *App) Copy(text string) error { return runtime.ClipboardSetText(a.ctx, text) }
+
+// SendFiles asks which files to send and delivers them to the device. It
+// returns how many were sent; zero means the dialog was dismissed.
+func (a *App) SendFiles(id, title string) (int, error) {
+	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{Title: title})
+	if err != nil || len(paths) == 0 {
+		return 0, err
+	}
+	return len(paths), a.client.Send(id, paths)
+}
+
+// FS performs a file operation on another device: list, rename, move,
+// delete or download.
+func (a *App) FS(id, op, path, to string) (core.FSResult, error) {
+	return a.client.FS(id, core.FSRequest{Op: op, Path: path, To: to})
+}
+
+func (a *App) Settings() (core.Settings, error) { return a.client.Settings() }
+
+func (a *App) SaveSettings(s core.Settings) error { return a.client.SaveSettings(s) }
+
+// SetDeviceColor chooses the colour a device is shown in.
+func (a *App) SetDeviceColor(id, color string) error {
+	s, err := a.client.Settings()
+	if err != nil {
+		return err
+	}
+	s.Colors[id] = color
+	return a.client.SaveSettings(s)
+}
+
+// Commands returns the commands this device offers to others.
+func (a *App) Commands() (map[string]string, error) { return a.client.Commands() }
+
+func (a *App) SaveCommands(commands map[string]string) error { return a.client.SaveCommands(commands) }
+
+// ChooseFolder asks for a folder; an empty result means the dialog was dismissed.
+func (a *App) ChooseFolder(current, title string) (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: title, DefaultDirectory: current})
 }
 
 func (a *App) Run(id, command string) error { return a.client.Run(id, command) }
@@ -108,6 +169,8 @@ func ensureDaemon(ctx context.Context, client *ipc.Client, log *slog.Logger) err
 }
 
 func main() {
+	view := flag.String("view", "", "page to open: relay, settings or files")
+	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	client, err := ipc.NewClient()
 	if err == nil {
@@ -118,16 +181,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	assets, _ := fs.Sub(embedded, "frontend")
-	a := &App{client: client}
+	a := &App{client: client, view: *view}
 	err = wails.Run(&options.App{
 		Title:             "Перекат",
-		Width:             460,
-		Height:            720,
-		MinWidth:          380,
-		MinHeight:         420,
-		BackgroundColour:  &options.RGBA{R: 0x1b, G: 0x1e, B: 0x20, A: 0xff},
-		AssetServer:       &assetserver.Options{Assets: assets},
+		Width:             980,
+		Height:            660,
+		MinWidth:          760,
+		MinHeight:         520,
+		BackgroundColour:  &options.RGBA{R: 0x16, G: 0x18, B: 0x1a, A: 0xff},
+		AssetServer:       &assetserver.Options{Assets: ui.Assets()},
 		Bind:              []any{a},
 		HideWindowOnClose: true,
 		OnStartup:         func(ctx context.Context) { a.ctx = ctx },

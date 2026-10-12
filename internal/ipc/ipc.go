@@ -5,10 +5,12 @@ package ipc
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/charg3d/perekat/internal/core"
+	"github.com/charg3d/perekat/internal/deploy"
 	"github.com/charg3d/perekat/internal/identity"
 	"github.com/charg3d/perekat/internal/protocol"
 )
@@ -55,6 +58,19 @@ func Serve(ctx context.Context, c *core.Core) error {
 		return err
 	}
 
+	srv := &http.Server{Handler: Handler(c)}
+	go func() {
+		<-ctx.Done()
+		srv.Close()
+	}()
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// Handler returns the daemon's local API.
+func Handler(c *core.Core) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(c.Self())
@@ -112,6 +128,57 @@ func Serve(ctx context.Context, c *core.Core) error {
 		}
 		return c.SendFiles(device, paths)
 	})
+	mux.HandleFunc("POST /fs", func(w http.ResponseWriter, r *http.Request) {
+		var req core.FSRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		res, err := c.FS(r.URL.Query().Get("device"), req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(res)
+	})
+	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(c.Settings())
+	})
+	act("PUT /settings", func(_ string, r *http.Request) error {
+		var s core.Settings
+		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+			return err
+		}
+		return c.SaveSettings(s)
+	})
+	mux.HandleFunc("GET /commands", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(c.Commands())
+	})
+	act("PUT /commands", func(_ string, r *http.Request) error {
+		var commands map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&commands); err != nil {
+			return err
+		}
+		return c.SaveCommands(commands)
+	})
+	mux.HandleFunc("GET /relay", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(c.RelayStatus())
+	})
+	act("POST /relay/setup", func(_ string, r *http.Request) error {
+		var target deploy.Target
+		if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
+			return err
+		}
+		return c.RelaySetup(r.Context(), target)
+	})
+	act("POST /relay/join", func(_ string, r *http.Request) error {
+		var code string
+		if err := json.NewDecoder(r.Body).Decode(&code); err != nil {
+			return err
+		}
+		return c.RelayJoin(strings.TrimSpace(code))
+	})
+	act("POST /relay/leave", func(string, *http.Request) error { return c.RelayLeave() })
 	mux.HandleFunc("POST /refresh", func(w http.ResponseWriter, r *http.Request) {
 		c.Refresh()
 	})
@@ -122,6 +189,42 @@ func Serve(ctx context.Context, c *core.Core) error {
 		json.NewEncoder(w).Encode(c.CommandsPath())
 	})
 
+	return mux
+}
+
+// ServeHTTP serves the API under /api/ and the given interface files on a
+// local TCP listener, for a client that cannot use the socket. Every API call
+// must carry the token: other programs on the machine can reach the port.
+//
+// extra, if given, handles the calls under /api/host/.
+func ServeHTTP(ctx context.Context, ln net.Listener, c *core.Core, token string, assets fs.FS, extra http.Handler) error {
+	daemon := Handler(c)
+	api := http.StripPrefix("/api", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if extra != nil && strings.HasPrefix(r.URL.Path, "/host/") {
+			extra.ServeHTTP(w, r)
+			return
+		}
+		daemon.ServeHTTP(w, r)
+	}))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Perekat-Token")), []byte(token)) != 1 {
+			http.Error(w, "wrong token", http.StatusForbidden)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("POST /api/upload", func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Perekat-Token")), []byte(token)) != 1 {
+			http.Error(w, "wrong token", http.StatusForbidden)
+			return
+		}
+		if err := upload(c, r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
+	mux.Handle("/", http.FileServerFS(assets))
+
 	srv := &http.Server{Handler: mux}
 	go func() {
 		<-ctx.Done()
@@ -131,6 +234,50 @@ func Serve(ctx context.Context, c *core.Core) error {
 		return err
 	}
 	return nil
+}
+
+// upload receives files picked in the interface and sends them to a device.
+// A client that cannot name files by path uses it instead of /send.
+func upload(c *core.Core, r *http.Request) error {
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "perekat-upload-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	var paths []string
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		name := filepath.Base(part.FileName())
+		if name == "." || name == string(filepath.Separator) {
+			continue
+		}
+		// Each file gets a folder of its own, so equal names do not collide.
+		sub, err := os.MkdirTemp(dir, "")
+		if err != nil {
+			return err
+		}
+		f, err := os.Create(filepath.Join(sub, name))
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(f, part)
+		f.Close()
+		if err != nil {
+			return err
+		}
+		paths = append(paths, f.Name())
+	}
+	return c.SendFiles(r.URL.Query().Get("device"), paths)
 }
 
 // Client calls the running daemon.
@@ -180,6 +327,50 @@ func (c *Client) Remote(device string) (bool, error) {
 
 func (c *Client) RemoteOff() error {
 	return c.call(http.MethodPost, "/remote/off", nil)
+}
+
+// FS performs a file operation on another device.
+func (c *Client) FS(device string, req core.FSRequest) (core.FSResult, error) {
+	var out core.FSResult
+	return out, c.callBody(http.MethodPost, "/fs?device="+url.QueryEscape(device), req, &out)
+}
+
+func (c *Client) Settings() (core.Settings, error) {
+	var out core.Settings
+	return out, c.call(http.MethodGet, "/settings", &out)
+}
+
+func (c *Client) SaveSettings(s core.Settings) error {
+	return c.callBody(http.MethodPut, "/settings", s, nil)
+}
+
+// Commands returns the commands this device offers to others.
+func (c *Client) Commands() (map[string]string, error) {
+	var out map[string]string
+	return out, c.call(http.MethodGet, "/commands", &out)
+}
+
+func (c *Client) SaveCommands(commands map[string]string) error {
+	return c.callBody(http.MethodPut, "/commands", commands, nil)
+}
+
+func (c *Client) RelayStatus() (core.RelayStatus, error) {
+	var out core.RelayStatus
+	return out, c.call(http.MethodGet, "/relay", &out)
+}
+
+// RelaySetup installs a relay server on a remote machine and joins it.
+func (c *Client) RelaySetup(target deploy.Target) error {
+	return c.callBody(http.MethodPost, "/relay/setup", target, nil)
+}
+
+// RelayJoin joins a relay server by a code from another device.
+func (c *Client) RelayJoin(code string) error {
+	return c.callBody(http.MethodPost, "/relay/join", code, nil)
+}
+
+func (c *Client) RelayLeave() error {
+	return c.call(http.MethodPost, "/relay/leave", nil)
 }
 
 // Refresh makes the daemon announce itself again.

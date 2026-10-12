@@ -257,3 +257,6 @@ func StartCapture(emit func(Event)) (stop func(), err error) {
 		<-done
 	}, nil
 }
+
+// Supported says whether this build can capture and replay mouse input.
+const Supported = true

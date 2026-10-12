@@ -73,8 +73,15 @@ type DeviceInfo struct {
 	Key string `json:"key,omitempty"`
 	// Remote is set while this machine's mouse controls the device.
 	Remote bool `json:"remote,omitempty"`
+	// Relayed is set when the device is reached through the relay server
+	// rather than directly.
+	Relayed bool `json:"relayed,omitempty"`
+	// Foreign is set when the device runs KDE Connect rather than perekat.
+	Foreign bool `json:"foreign,omitempty"`
 	// CanRemote is set when the device can be put under remote control.
 	CanRemote bool `json:"canRemote,omitempty"`
+	// CanBrowse is set when the device's files can be browsed.
+	CanBrowse bool `json:"canBrowse,omitempty"`
 	// CanRing is set when the device can be asked to play a sound.
 	CanRing  bool      `json:"canRing,omitempty"`
 	Commands []Command `json:"commands,omitempty"`
@@ -111,6 +118,18 @@ type Core struct {
 
 	// OnRefresh, if set, is called to look for devices again.
 	OnRefresh func()
+	// OnRestart, if set, is called to restart the daemon.
+	OnRestart func()
+
+	settingsMu sync.Mutex
+	stored     storedSettings
+
+	fsMu      sync.Mutex
+	fsPending map[string]chan FSResult
+
+	relayMu  sync.Mutex
+	relayCtx context.Context
+	relay    *relaySession
 
 	clipMu   sync.Mutex
 	clip     string
@@ -126,7 +145,7 @@ func New(log *slog.Logger, links link.Config, store *trust.Store, dir string) (*
 	if err != nil {
 		return nil, err
 	}
-	return &Core{
+	c := &Core{
 		log:       log,
 		links:     links,
 		trust:     store,
@@ -134,7 +153,9 @@ func New(log *slog.Logger, links link.Config, store *trust.Store, dir string) (*
 		dir:       dir,
 		devices:   map[string]*device{},
 		dialing:   map[string]bool{},
-	}, nil
+	}
+	c.loadSettings()
+	return c, nil
 }
 
 // Serve accepts incoming links until the listener is closed.
@@ -151,6 +172,10 @@ func (c *Core) Serve(ctx context.Context, ln net.Listener) error {
 			}
 			return err
 		}
+		if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok && discovery.SameHost(addr.IP) {
+			conn.Close()
+			continue
+		}
 		go func() {
 			l, err := c.links.Accept(conn)
 			if err != nil {
@@ -165,8 +190,12 @@ func (c *Core) Serve(ctx context.Context, ln net.Listener) error {
 // HandlePeer connects to a device heard on the network unless already linked.
 func (c *Core) HandlePeer(ctx context.Context, p discovery.Peer) {
 	id := p.Identity.DeviceID
+	if !speaksPerekat(p.Identity) && !c.foreignAllowed() {
+		return
+	}
 	c.mu.Lock()
-	if d := c.devices[id]; (d != nil && d.link != nil) || c.dialing[id] {
+	// A device reached through the relay is dialled anyway: a direct link is better.
+	if d := c.devices[id]; (d != nil && d.link != nil && !d.link.Relayed) || c.dialing[id] {
 		c.mu.Unlock()
 		return
 	}
@@ -188,6 +217,10 @@ func (c *Core) HandlePeer(ctx context.Context, p discovery.Peer) {
 
 func (c *Core) attach(l *link.Link) {
 	id := l.Peer.DeviceID
+	if !speaksPerekat(l.Peer) && !c.foreignAllowed() {
+		l.Close()
+		return
+	}
 	if _, paired := c.trust.Get(id); paired && !c.trust.Matches(id, l.Cert.Raw) {
 		c.log.Warn("rejected link: certificate differs from the paired one", "device", l.Peer.DeviceName, "addr", l.RemoteIP())
 		l.Close()
@@ -205,7 +238,13 @@ func (c *Core) attach(l *link.Link) {
 	// Two perekat devices that hear each other at once both dial, and each
 	// would keep a different connection. Agree on the one dialled by the
 	// device with the smaller id. Other implementations keep the newest.
-	if old != nil && speaksPerekat(l.Peer) {
+	if old != nil && !old.Relayed && l.Relayed {
+		// Never trade a direct link for one through the relay.
+		c.mu.Unlock()
+		l.Close()
+		return
+	}
+	if old != nil && old.Relayed == l.Relayed && speaksPerekat(l.Peer) {
 		wantDialed := c.links.Self.DeviceID < id
 		if old.Dialed == wantDialed && l.Dialed != wantDialed {
 			c.mu.Unlock()
@@ -224,7 +263,7 @@ func (c *Core) attach(l *link.Link) {
 		old.Close()
 	}
 	paired := c.trust.Matches(id, l.Cert.Raw)
-	c.log.Info("connected", "device", l.Peer.DeviceName, "addr", l.RemoteIP(), "paired", paired)
+	c.log.Info("connected", "device", l.Peer.DeviceName, "addr", l.RemoteIP(), "paired", paired, "relayed", l.Relayed)
 	if paired {
 		go c.greet(l)
 	}
@@ -267,6 +306,10 @@ func (c *Core) readLoop(l *link.Link) {
 			go desktop.Ring()
 		case protocol.TypeBattery:
 			c.handleBattery(l, p)
+		case protocol.TypeFSRequest:
+			c.handleFSRequest(l, p)
+		case protocol.TypeFSResponse:
+			c.handleFSResponse(p)
 		default:
 			c.log.Debug("unhandled packet", "device", l.Peer.DeviceName, "type", p.Type)
 		}
@@ -427,8 +470,11 @@ func (c *Core) info(id string, d *device) DeviceInfo {
 		Addr:      d.addr.String(),
 		Connected: true,
 		Paired:    paired,
+		Relayed:   d.link.Relayed,
+		Foreign:   !speaksPerekat(d.identity),
 		Remote:    c.remote != nil && c.remote.target == id,
-		CanRemote: paired && speaksPerekat(d.identity),
+		CanRemote: paired && accepts(d.identity, protocol.TypeInput),
+		CanBrowse: paired && accepts(d.identity, protocol.TypeFSRequest),
 		CanRing:   paired && accepts(d.identity, protocol.TypeRing),
 		Commands:  d.commands,
 		Battery:   d.battery,
@@ -568,8 +614,8 @@ func (c *Core) Remote(query string) (bool, error) {
 	if !c.trust.Matches(id, d.link.Cert.Raw) {
 		return false, errors.New("device is not paired")
 	}
-	if !speaksPerekat(d.identity) {
-		return false, errors.New("device does not accept remote control (it is not running perekat)")
+	if !accepts(d.identity, protocol.TypeInput) {
+		return false, errors.New("device cannot be controlled with a mouse")
 	}
 
 	r := &remote{target: id, events: make(chan input.Event, 1024), quit: make(chan struct{})}
@@ -718,7 +764,7 @@ func (c *Core) pairedLinks() []*link.Link {
 
 // greet brings a paired device up to date right after it connects or pairs.
 func (c *Core) greet(l *link.Link) {
-	if speaksPerekat(l.Peer) {
+	if input.Supported && accepts(l.Peer, protocol.TypeInput) {
 		c.prepareInjector()
 	}
 	c.greetClipboard(l)
@@ -731,7 +777,11 @@ func (c *Core) greet(l *link.Link) {
 
 // speaksPerekat reports whether the device understands perekat's own packets.
 func speaksPerekat(id protocol.Identity) bool {
-	return accepts(id, protocol.TypeInput)
+	return accepts(id, protocol.TypePeer)
+}
+
+func portString(port int) string {
+	return strconv.Itoa(port)
 }
 
 func send(l *link.Link, typ string, body any) error {

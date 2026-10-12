@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !phone
 
 // Package desktop wraps the bits of the operating system perekat touches:
 // notifications, sounds, the downloads folder, the shell and the battery.

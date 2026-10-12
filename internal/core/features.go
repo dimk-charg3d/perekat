@@ -40,7 +40,7 @@ func (c *Core) RunClipboard(ctx context.Context) {
 }
 
 func (c *Core) localClipboard(text string, initial bool) {
-	if text == "" || len(text) > maxClipboard {
+	if text == "" || len(text) > maxClipboard || !c.clipboardEnabled() {
 		return
 	}
 	c.clipMu.Lock()
@@ -65,7 +65,7 @@ func (c *Core) localClipboard(text string, initial bool) {
 
 func (c *Core) handleClipboard(l *link.Link, p protocol.Packet) {
 	var body clipboardBody
-	if err := json.Unmarshal(p.Body, &body); err != nil {
+	if err := json.Unmarshal(p.Body, &body); err != nil || !c.clipboardEnabled() {
 		return
 	}
 	// On connect each side offers what it has; the more recent copy wins.

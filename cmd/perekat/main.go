@@ -2,24 +2,34 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"text/tabwriter"
+
+	"golang.org/x/term"
 
 	"github.com/charg3d/perekat/internal/app"
 	"github.com/charg3d/perekat/internal/core"
+	"github.com/charg3d/perekat/internal/deploy"
 	"github.com/charg3d/perekat/internal/ipc"
+	"github.com/charg3d/perekat/internal/phone"
+	"github.com/charg3d/perekat/internal/ui"
 )
 
 const usage = `perekat links Arch and Windows machines on a local network.
 
 Usage:
-  perekat daemon [-v]       run in the foreground: find devices and keep links to them
+  perekat daemon [-v] [-web ADDR]   run in the foreground: find devices and keep links to them;
+                            -web also serves the interface for a browser, e.g. -web 127.0.0.1:8716
   perekat devices           list connected and paired devices
   perekat refresh           look for devices again
   perekat pair <device>     ask a device to pair, or accept its request
@@ -31,6 +41,12 @@ Usage:
   perekat commands          show the file that defines the commands this machine offers
   perekat ping <device>     show a notification on a device
   perekat ring <device>     make a device play a sound
+
+Remote access, for devices that are not on the same network:
+  perekat relay                         show the status and the code other devices join with
+  perekat relay setup [user@]host[:port]   install a relay server on your own VPS over SSH
+  perekat relay join <code>             join a server that another device set up
+  perekat relay leave                   stop using the relay server
 
 <device> is a device name or id as shown by "perekat devices".
 `
@@ -44,6 +60,9 @@ func main() {
 	switch cmd, args := os.Args[1], os.Args[2:]; {
 	case cmd == "daemon":
 		err = daemon(args)
+	case cmd == "phone":
+		// Not for people: this is how the Android application starts the daemon.
+		err = phoneDaemon(args)
 	case cmd == "devices" && len(args) == 0:
 		err = devices()
 	case cmd == "refresh" && len(args) == 0:
@@ -60,6 +79,8 @@ func main() {
 		err = run(args[0], args[1:])
 	case cmd == "commands" && len(args) == 0:
 		err = commands()
+	case cmd == "relay":
+		err = relayCommand(args)
 	case cmd == "ping" && len(args) == 1:
 		err = withClient(func(c *ipc.Client) error { return c.Ping(args[0]) })
 	case cmd == "ring" && len(args) == 1:
@@ -77,6 +98,7 @@ func main() {
 func daemon(args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	verbose := fs.Bool("v", false, "log ignored packets and failed connections")
+	web := fs.String("web", "", "also serve the interface for a browser on this address")
 	fs.Parse(args)
 
 	level := slog.LevelInfo
@@ -87,6 +109,20 @@ func daemon(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if *web != "" {
+		var raw [16]byte
+		rand.Read(raw[:])
+		token := hex.EncodeToString(raw[:])
+		app.Extra = func(ctx context.Context, c *core.Core) error {
+			ln, err := net.Listen("tcp", *web)
+			if err != nil {
+				return err
+			}
+			// The token in the address is what admits the browser.
+			fmt.Printf("interface: http://%s/#%s\n", ln.Addr(), token)
+			return ipc.ServeHTTP(ctx, ln, c, token, ui.Assets(), nil)
+		}
+	}
 	return app.Run(ctx, log)
 }
 
@@ -119,6 +155,8 @@ func status(d core.DeviceInfo) string {
 		return "waiting for it to accept, key " + d.Key
 	case d.Remote:
 		return "paired, under remote control"
+	case d.Paired && d.Relayed:
+		return "paired, via relay"
 	case d.Paired && d.Connected:
 		return "paired"
 	case d.Paired:
@@ -227,4 +265,68 @@ func commands() error {
 		fmt.Printf("Commands this machine offers to paired devices are defined in:\n  %s\n\nIt is a JSON object of name and shell command, for example:\n  {\"lock\": \"hyprlock\", \"sleep\": \"systemctl suspend\"}\n", path)
 		return nil
 	})
+}
+
+func relayCommand(args []string) error {
+	return withClient(func(c *ipc.Client) error {
+		switch {
+		case len(args) == 0:
+			st, err := c.RelayStatus()
+			if err != nil {
+				return err
+			}
+			if !st.Configured {
+				fmt.Println("remote access is not set up; see `perekat relay setup`")
+				return nil
+			}
+			state := "connected"
+			if !st.Connected {
+				state = "NOT connected"
+			}
+			fmt.Printf("relay server: %s (%s)\n\nTo add another device, run on it:\n  perekat relay join '%s'\n", st.Host, state, st.Code)
+			return nil
+		case args[0] == "setup" && len(args) == 2:
+			target, err := deploy.ParseTarget(args[1])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "Password for %s@%s (leave empty to use your SSH key): ", target.User, target.Host)
+			password, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			if err != nil {
+				return err
+			}
+			target.Password = string(password)
+			fmt.Println("installing the relay server, this takes a few seconds...")
+			if err := c.RelaySetup(target); err != nil {
+				return err
+			}
+			fmt.Println("done: this device is connected")
+			return relayCommand(nil)
+		case args[0] == "join" && len(args) == 2:
+			return c.RelayJoin(args[1])
+		case args[0] == "leave" && len(args) == 1:
+			return c.RelayLeave()
+		}
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+		return nil
+	})
+}
+
+func phoneDaemon(args []string) error {
+	fs := flag.NewFlagSet("phone", flag.ExitOnError)
+	dir := fs.String("dir", "", "the application's private folder")
+	downloads := fs.String("downloads", "", "where received files go")
+	name := fs.String("name", "", "the phone's name")
+	nets := fs.String("nets", "", "the phone's addresses, comma-separated")
+	fs.Parse(args)
+	phone.SetNetworks(strings.Split(*nets, ","))
+	if *dir == "" || *downloads == "" {
+		return fmt.Errorf("phone needs -dir and -downloads")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	return phone.Run(ctx, log, *dir, *downloads, *name)
 }

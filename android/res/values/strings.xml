@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Перекат</string>
+    <string name="running">Перекат на связи с вашими устройствами</string>
+    <string name="channel_service">Работа в фоне</string>
+    <string name="channel_events">События</string>
+    <string name="starting">Запускаю…</string>
+</resources>

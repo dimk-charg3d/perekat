@@ -30,12 +30,21 @@ const (
 	// TypeInput carries mouse events between two perekat devices; it is not
 	// part of KDE Connect.
 	TypeInput = "perekat.input"
+	// TypePeer is never sent; listing it marks a device as running perekat.
+	TypePeer = "perekat.peer"
+	// TypeFSRequest and TypeFSResponse let one perekat device browse the
+	// files of another.
+	TypeFSRequest  = "perekat.fs.request"
+	TypeFSResponse = "perekat.fs.response"
 )
 
 // Capabilities are the packet types perekat both sends and accepts. Other
 // implementations enable a feature only when both sides list its types.
 var Capabilities = []string{
+	TypePeer,
 	TypeInput,
+	TypeFSRequest,
+	TypeFSResponse,
 	TypeClipboard,
 	TypeClipboardConnect,
 	TypeShare,

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !phone
 
 package input
 
@@ -311,3 +311,6 @@ func readDevice(f *os.File, kind deviceKind, scale float64, emit func(Event)) {
 		}
 	}
 }
+
+// Supported says whether this build can capture and replay mouse input.
+const Supported = true

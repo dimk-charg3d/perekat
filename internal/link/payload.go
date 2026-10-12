@@ -12,32 +12,52 @@ import (
 	"time"
 )
 
-// Payloads travel over their own connection: the sender listens on a port of
-// this range and names it in the packet, the receiver connects and reads.
+// Payloads travel over their own connection. On a direct link the sender
+// listens on a port of this range and names it in the packet, and the receiver
+// connects to it.
 const (
 	payloadPortMin = 1739
 	payloadPortMax = 1764
 	payloadWait    = 30 * time.Second
 )
 
-// ListenPayload opens a port for one payload download.
-func ListenPayload() (net.Listener, int, error) {
+// PayloadTransport opens the side connections that carry payloads for a link.
+type PayloadTransport interface {
+	// Offer reserves a transfer id for the packet. wait blocks until the
+	// peer connects to it; cancel releases it if wait is never called.
+	Offer() (id int, wait func() (net.Conn, error), cancel func(), err error)
+	// Open connects to a transfer the peer offered.
+	Open(ctx context.Context, id int) (net.Conn, error)
+}
+
+type directPayload struct{ l *Link }
+
+func (d directPayload) Offer() (int, func() (net.Conn, error), func(), error) {
 	var lastErr error
 	for port := payloadPortMin; port <= payloadPortMax; port++ {
 		ln, err := net.Listen("tcp4", ":"+strconv.Itoa(port))
-		if err == nil {
-			return ln, port, nil
+		if err != nil {
+			lastErr = err
+			continue
 		}
-		lastErr = err
+		wait := func() (net.Conn, error) {
+			defer ln.Close()
+			ln.(*net.TCPListener).SetDeadline(time.Now().Add(payloadWait))
+			return ln.Accept()
+		}
+		return port, wait, func() { ln.Close() }, nil
 	}
-	return nil, 0, fmt.Errorf("no free payload port: %w", lastErr)
+	return 0, nil, nil, fmt.Errorf("no free payload port: %w", lastErr)
 }
 
-// SendPayload waits for the peer of l to connect to ln and streams src to it.
-func (c Config) SendPayload(ln net.Listener, l *Link, src io.Reader) error {
-	defer ln.Close()
-	ln.(*net.TCPListener).SetDeadline(time.Now().Add(payloadWait))
-	conn, err := ln.Accept()
+func (d directPayload) Open(ctx context.Context, id int) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: handshakeTimeout}
+	return dialer.DialContext(ctx, "tcp4", net.JoinHostPort(d.l.RemoteIP().String(), strconv.Itoa(id)))
+}
+
+// SendPayload waits for the peer of l to connect and streams src to it.
+func (c Config) SendPayload(l *Link, wait func() (net.Conn, error), src io.Reader) error {
+	conn, err := wait()
 	if err != nil {
 		return fmt.Errorf("the other device did not start the download: %w", err)
 	}
@@ -54,10 +74,9 @@ func (c Config) SendPayload(ln net.Listener, l *Link, src io.Reader) error {
 	return err
 }
 
-// FetchPayload downloads size bytes that the peer of l offers on port.
-func (c Config) FetchPayload(ctx context.Context, l *Link, port int, dst io.Writer, size int64) error {
-	d := net.Dialer{Timeout: handshakeTimeout}
-	conn, err := d.DialContext(ctx, "tcp4", net.JoinHostPort(l.RemoteIP().String(), strconv.Itoa(port)))
+// FetchPayload downloads size bytes of the transfer id that the peer of l offers.
+func (c Config) FetchPayload(ctx context.Context, l *Link, id int, dst io.Writer, size int64) error {
+	conn, err := l.Payload.Open(ctx, id)
 	if err != nil {
 		return err
 	}

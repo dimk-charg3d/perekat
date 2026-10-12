@@ -29,6 +29,7 @@ type transfer struct {
 // TransferInfo describes one file being sent or received.
 type TransferInfo struct {
 	ID       int    `json:"id"`
+	DeviceID string `json:"deviceId"`
 	Device   string `json:"device"`
 	Name     string `json:"name"`
 	Size     int64  `json:"size"`
@@ -46,7 +47,7 @@ func (c *Core) startTransfer(l *link.Link, name string, size int64, incoming boo
 	defer c.transferMu.Unlock()
 	c.transferID++
 	t := &transfer{TransferInfo: TransferInfo{
-		ID: c.transferID, Device: l.Peer.DeviceName, Name: name, Size: size, Incoming: incoming, State: "active",
+		ID: c.transferID, DeviceID: l.Peer.DeviceID, Device: l.Peer.DeviceName, Name: name, Size: size, Incoming: incoming, State: "active",
 	}}
 	c.transfers = append(c.transfers, t)
 	if extra := len(c.transfers) - keptTransfers; extra > 0 {
@@ -132,7 +133,7 @@ func (c *Core) receiveFile(l *link.Link, name string, size int64, port int) {
 }
 
 func (c *Core) download(l *link.Link, t *transfer, port int) (string, error) {
-	dir := desktop.DownloadsDir()
+	dir := c.downloadDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -234,7 +235,7 @@ func (c *Core) sendFile(l *link.Link, path string) error {
 		return errors.New("not a regular file")
 	}
 
-	ln, port, err := link.ListenPayload()
+	id, wait, cancel, err := l.Payload.Offer()
 	if err != nil {
 		return err
 	}
@@ -245,19 +246,19 @@ func (c *Core) sendFile(l *link.Link, path string) error {
 		"totalPayloadSize": info.Size(),
 	})
 	if err != nil {
-		ln.Close()
+		cancel()
 		return err
 	}
 	p.PayloadSize = info.Size()
-	p.PayloadTransferInfo = &protocol.PayloadTransfer{Port: port}
+	p.PayloadTransferInfo = &protocol.PayloadTransfer{Port: id}
 	if err := l.Send(p); err != nil {
-		ln.Close()
+		cancel()
 		return err
 	}
 
 	t := c.startTransfer(l, info.Name(), info.Size(), false)
 	started := time.Now()
-	err = c.links.SendPayload(ln, l, counter{t: t, r: f})
+	err = c.links.SendPayload(l, wait, counter{t: t, r: f})
 	c.finishTransfer(t, "", err)
 	if err == nil {
 		c.log.Info("file sent", "device", l.Peer.DeviceName, "file", info.Name(), "took", time.Since(started).Round(time.Millisecond))
