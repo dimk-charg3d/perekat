@@ -42,7 +42,7 @@ const (
 type FSRequest struct {
 	ID string `json:"id"`
 	// Op is one of: list, stat, places, mkdir, create, read, write, truncate,
-	// rename, move, copy, replace (rename over), extract, archive, convert, preview.dir, delete (to the trash), remove (one file or empty
+	// rename, move, copy, replace (rename over), extract, archive, convert, preview.dir, search, props, zip, unzip, delete (to the trash), remove (one file or empty
 	// folder, for good), purge (a whole tree, for good), thumb,
 	// share.create, share.remove.
 	Op   string `json:"op"`
@@ -55,6 +55,8 @@ type FSRequest struct {
 	Length int    `json:"length,omitempty"`
 	Size   int64  `json:"size,omitempty"`
 	Data   []byte `json:"data,omitempty"`
+	// Paths names several files at once, for packing.
+	Paths []string `json:"paths,omitempty"`
 	// Unique makes mkdir and create pick a free name instead of failing or
 	// replacing what is there.
 	Unique bool `json:"unique,omitempty"`
@@ -84,6 +86,11 @@ type FSResult struct {
 	Entry     *FSEntry  `json:"entry,omitempty"`
 	Data      []byte    `json:"data,omitempty"`
 	Shares    []Share   `json:"shares,omitempty"`
+	// Count is how many files a folder holds; Free and Total describe the
+	// disk it is on.
+	Count int64 `json:"count,omitempty"`
+	Free  int64 `json:"free,omitempty"`
+	Total int64 `json:"total,omitempty"`
 }
 
 // FS performs a file operation on a device, or on this one when query is
@@ -125,7 +132,7 @@ func (c *Core) FS(query string, req FSRequest) (FSResult, error) {
 	}
 	timeout := fsTimeout
 	switch req.Op {
-	case "copy", "move", "delete", "purge":
+	case "copy", "move", "delete", "purge", "zip", "unzip":
 		timeout = fsLongTimeout
 	case "convert":
 		timeout = 2 * time.Minute
@@ -233,6 +240,25 @@ func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, erro
 	case "thumb":
 		data, err := c.thumbnail(path, req.Length)
 		return FSResult{Data: data}, err
+	case "search":
+		return searchFiles(path, req.To)
+	case "props":
+		return properties(path)
+	case "zip":
+		for _, p := range req.Paths {
+			if !filepath.IsAbs(p) || !allowed(filepath.Clean(p)) {
+				return FSResult{}, denied
+			}
+		}
+		made, err := packZip(req.Paths, path)
+		return FSResult{Path: made}, err
+	case "unzip":
+		to := filepath.Clean(req.To)
+		if !filepath.IsAbs(to) || !allowed(to) {
+			return FSResult{}, denied
+		}
+		made, err := unpack(path, to)
+		return FSResult{Path: made}, err
 	case "extract":
 		data, err := extractHTML(path)
 		return FSResult{Data: data}, err

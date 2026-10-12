@@ -45,6 +45,10 @@ const icons = {
   office: icon('<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5M9 12h6M9 15h6M9 18h4"/>'),
   archive: icon('<path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM12 4v2M12 8v2M12 12v2M10.500 16h3v2h-3z"/>'),
   code: icon('<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5M10.500 12.500L8.500 15l2 2.500M13.500 12.500l2 2.500-2 2.500"/>'),
+  search: icon('<circle cx="11" cy="11" r="6.500"/><path d="M16 16l4.500 4.500"/>'),
+  star: icon('<path d="M12 3.500l2.600 5.400 5.900 .800-4.300 4.100 1 5.900-5.200-2.800-5.200 2.800 1-5.900-4.300-4.100 5.900-.800z"/>'),
+  info: icon('<circle cx="12" cy="12" r="9"/><path d="M12 11v5.500M12 7.500v.010"/>'),
+  split: icon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
   blank: icon(""),
   palette: icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-1.5 1-2 2.2-2H18a3 3 0 0 0 3-3c0-6-4-11-9-11z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/>'),
 };

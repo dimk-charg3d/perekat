@@ -214,6 +214,18 @@ func Handler(c *core.Core) http.Handler {
 			}
 		}
 	})
+	mux.HandleFunc("GET /ui", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(c.UIState())
+	})
+	mux.HandleFunc("PUT /ui", func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err == nil {
+			err = c.SaveUIState(data)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(c.Settings())
 	})
@@ -425,6 +437,17 @@ type Paste struct {
 
 func (c *Client) FSPaste(p Paste) error {
 	return c.callBody(http.MethodPost, "/fs/paste", p, nil)
+}
+
+// UIState returns what the window remembers between runs, as JSON.
+func (c *Client) UIState() (string, error) {
+	var out json.RawMessage
+	err := c.call(http.MethodGet, "/ui", &out)
+	return string(out), err
+}
+
+func (c *Client) SaveUIState(state string) error {
+	return c.callBody(http.MethodPut, "/ui", json.RawMessage(state), nil)
 }
 
 func (c *Client) FSPreview(device, path string) (core.Preview, error) {

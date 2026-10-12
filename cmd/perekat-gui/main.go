@@ -108,6 +108,17 @@ func (a *App) FSPaste(src string, paths []string, dst, dir string, move bool) er
 	return a.client.FSPaste(ipc.Paste{Src: src, Paths: paths, Dst: dst, Dir: dir, Move: move})
 }
 
+// UIState returns what the window remembers between runs, as JSON.
+func (a *App) UIState() (string, error) { return a.client.UIState() }
+
+func (a *App) SaveUIState(state string) error { return a.client.SaveUIState(state) }
+
+// FSUploadPaths puts files of this machine, named by path, into a folder of
+// a device: what dropping files onto the window does.
+func (a *App) FSUploadPaths(id, dir string, paths []string) error {
+	return a.client.FSPaste(ipc.Paste{Src: core.SelfDevice, Paths: paths, Dst: id, Dir: dir})
+}
+
 // FSPreview prepares an office document for showing in the window.
 func (a *App) FSPreview(id, path string) (core.Preview, error) { return a.client.FSPreview(id, path) }
 
@@ -248,7 +259,9 @@ func main() {
 		AssetServer:       &assetserver.Options{Assets: ui.Assets(), Handler: client.Files()},
 		Bind:              []any{a},
 		HideWindowOnClose: true,
-		OnStartup:         func(ctx context.Context) { a.ctx = ctx },
+		// Files dropped from the system's file manager arrive with their paths.
+		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
+		OnStartup:   func(ctx context.Context) { a.ctx = ctx },
 		// Closing the window keeps perekat running; launching it again brings
 		// the window back.
 		SingleInstanceLock: &options.SingleInstanceLock{

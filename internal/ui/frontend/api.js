@@ -54,6 +54,8 @@ function httpApi() {
     },
     FS: (id, request) => call("POST", "/fs" + of(id), request),
     FSPaste: (src, paths, dst, dir, move) => call("POST", "/fs/paste", { src, paths, dst, dir, move }),
+    UIState: async () => JSON.stringify((await call("GET", "/ui")) || {}),
+    SaveUIState: (text) => call("PUT", "/ui", JSON.parse(text)),
     FSPreview: (id, path) => call("POST", "/fs/preview" + of(id) + "&path=" + encodeURIComponent(path)),
     InitialPath: async () => new URLSearchParams(location.search).get("open") || "",
     FSOpen: (id, path) => call("POST", "/fs/open" + of(id) + "&path=" + encodeURIComponent(path)),
