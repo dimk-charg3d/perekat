@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,26 +18,46 @@ import (
 	"github.com/charg3d/perekat/internal/protocol"
 )
 
-// File browsing: a paired perekat device may list, rename, move, trash and
-// fetch files here. The whole file system the user can reach is open to it,
-// unless file access is switched off in the settings.
+// File browsing: a paired perekat device may list, read and change files
+// here. The whole file system the user can reach is open to it, unless file
+// access is switched off in the settings; network folders stay open always.
 
 const (
 	fsTimeout = 20 * time.Second
+	// fsLongTimeout is for operations that work through whole folders.
+	fsLongTimeout = 30 * time.Minute
 	// fsMaxEntries keeps the listing of a huge folder to a sane size.
 	fsMaxEntries = 5000
 	// fsDrives is the path that stands for the list of drives on Windows.
 	fsDrives = "/"
+	// fsChunk is the most file content one packet carries.
+	fsChunk = 512 * 1024
+
+	// SelfDevice names this device where a device is expected, so the same
+	// calls work on local files.
+	SelfDevice = "self"
 )
 
 // FSRequest asks a device to do something with its files.
 type FSRequest struct {
 	ID string `json:"id"`
-	// Op is list, rename, move, delete or download.
+	// Op is one of: list, stat, places, mkdir, create, read, write, truncate,
+	// rename, move, copy, replace (rename over), delete (to the trash), remove (one file or empty
+	// folder, for good), purge (a whole tree, for good), thumb,
+	// share.create, share.remove.
 	Op   string `json:"op"`
 	Path string `json:"path"`
-	// To is the new name for rename and the destination folder for move.
-	To string `json:"to,omitempty"`
+	// To is the new name for rename, the destination folder for move and
+	// copy, and the name of a new network folder.
+	To     string `json:"to,omitempty"`
+	Offset int64  `json:"offset,omitempty"`
+	// Length is how many bytes to read, or the size of a thumbnail in pixels.
+	Length int    `json:"length,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+	Data   []byte `json:"data,omitempty"`
+	// Unique makes mkdir and create pick a free name instead of failing or
+	// replacing what is there.
+	Unique bool `json:"unique,omitempty"`
 }
 
 // FSEntry is one file or folder in a listing.
@@ -45,22 +67,35 @@ type FSEntry struct {
 	Dir      bool   `json:"dir"`
 	Size     int64  `json:"size"`
 	Modified int64  `json:"modified"`
+	// Kind tells well-known folders apart: home, downloads, pictures and so on.
+	Kind string `json:"kind,omitempty"`
 }
 
 // FSResult is the answer to an FSRequest.
 type FSResult struct {
 	ID    string `json:"id"`
 	Error string `json:"error,omitempty"`
-	// Path is the folder that was listed and Parent the one above it, empty
-	// at the top.
+	// Path is the folder that was listed, or the file or folder that was
+	// made, and Parent the folder above a listed one, empty at the top.
 	Path      string    `json:"path,omitempty"`
 	Parent    string    `json:"parent,omitempty"`
 	Entries   []FSEntry `json:"entries"`
 	Truncated bool      `json:"truncated,omitempty"`
+	Entry     *FSEntry  `json:"entry,omitempty"`
+	Data      []byte    `json:"data,omitempty"`
+	Shares    []Share   `json:"shares,omitempty"`
 }
 
-// FS performs a file operation on another device and waits for the answer.
+// FS performs a file operation on a device, or on this one when query is
+// SelfDevice, and waits for the answer.
 func (c *Core) FS(query string, req FSRequest) (FSResult, error) {
+	if query == SelfDevice {
+		res, err := c.serveFS("", req, true)
+		if res.Entries == nil {
+			res.Entries = []FSEntry{}
+		}
+		return res, err
+	}
 	l, err := c.pairedLink(query)
 	if err != nil {
 		return FSResult{}, err
@@ -88,13 +123,20 @@ func (c *Core) FS(query string, req FSRequest) (FSResult, error) {
 	if err := send(l, protocol.TypeFSRequest, req); err != nil {
 		return FSResult{}, err
 	}
+	timeout := fsTimeout
+	switch req.Op {
+	case "copy", "move", "delete", "purge":
+		timeout = fsLongTimeout
+	}
 	select {
 	case res := <-answer:
 		if res.Error != "" {
 			return FSResult{}, errors.New(res.Error)
 		}
 		return res, nil
-	case <-time.After(fsTimeout):
+	case <-l.Done():
+		return FSResult{}, errors.New("device is not connected")
+	case <-time.After(timeout):
 		return FSResult{}, errors.New("the device did not answer")
 	}
 }
@@ -122,7 +164,7 @@ func (c *Core) handleFSRequest(l *link.Link, p protocol.Packet) {
 	}
 	// Listing a slow disk must not hold up the other packets of this link.
 	go func() {
-		res, err := c.serveFS(l, req)
+		res, err := c.serveFS(l.Peer.DeviceName, req, false)
 		res.ID = req.ID
 		if err != nil {
 			res = FSResult{ID: req.ID, Error: err.Error()}
@@ -134,52 +176,182 @@ func (c *Core) handleFSRequest(l *link.Link, p protocol.Packet) {
 	}()
 }
 
-func (c *Core) serveFS(l *link.Link, req FSRequest) (FSResult, error) {
-	if !c.fileAccess() {
-		return FSResult{}, errors.New("file access is switched off on that device")
+// serveFS carries out a request. trusted marks the requests of this device's
+// own user, which no setting restricts.
+func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, error) {
+	allowed := func(path string) bool {
+		return trusted || c.fileAccess() || c.inShare(path)
 	}
-	if req.Op == "list" {
-		return listDir(req.Path)
+	denied := errors.New("file access is switched off on that device")
+
+	switch req.Op {
+	case "places":
+		res := FSResult{Shares: c.Shares()}
+		if trusted || c.fileAccess() {
+			res.Entries = places()
+		}
+		return res, nil
+	case "share.create":
+		share, err := c.CreateShare(req.To)
+		return FSResult{Path: share.Path}, err
+	case "share.remove":
+		return FSResult{}, c.RemoveShare(req.Path)
+	case "list":
+		if req.Path == "" || req.Path == fsDrives {
+			if !trusted && !c.fileAccess() {
+				return FSResult{}, denied
+			}
+			return listDir(req.Path)
+		}
 	}
 
 	path := filepath.Clean(req.Path)
 	if !filepath.IsAbs(path) {
 		return FSResult{}, errors.New("not a full path")
 	}
-	home, _ := os.UserHomeDir()
-	if path == filepath.Dir(path) || path == home {
-		return FSResult{}, errors.New("this folder cannot be changed")
+	if !allowed(path) {
+		return FSResult{}, denied
 	}
+
+	// What only looks at files.
+	switch req.Op {
+	case "list":
+		return listDir(path)
+	case "stat":
+		entry, err := statEntry(path)
+		return FSResult{Entry: entry}, err
+	case "read":
+		data, err := readChunk(path, req.Offset, req.Length)
+		return FSResult{Data: data}, err
+	case "thumb":
+		data, err := c.thumbnail(path, req.Length)
+		return FSResult{Data: data}, err
+	}
+
+	// What makes something new.
+	switch req.Op {
+	case "mkdir", "create":
+		if req.Unique {
+			path = uniquePath(path)
+		}
+		var err error
+		if req.Op == "mkdir" {
+			err = os.Mkdir(path, 0o755)
+		} else {
+			flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+			if req.Unique {
+				flags |= os.O_EXCL
+			}
+			var f *os.File
+			if f, err = os.OpenFile(path, flags, 0o644); err == nil {
+				err = f.Close()
+			}
+		}
+		return FSResult{Path: path}, plain(err)
+	}
+
+	// The rest changes something that must be there.
 	if _, err := os.Lstat(path); err != nil {
 		return FSResult{}, plain(err)
 	}
+	switch req.Op {
+	case "write":
+		f, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil {
+			return FSResult{}, plain(err)
+		}
+		_, err = f.WriteAt(req.Data, req.Offset)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		return FSResult{}, plain(err)
+	case "truncate":
+		return FSResult{}, plain(os.Truncate(path, req.Size))
+	case "copy":
+		if !filepath.IsAbs(req.To) || !allowed(filepath.Clean(req.To)) {
+			return FSResult{}, errors.New("not a folder that can be copied to")
+		}
+		dst := uniquePath(filepath.Join(filepath.Clean(req.To), filepath.Base(path)))
+		if within(dst, path) {
+			return FSResult{}, errors.New("a folder cannot be copied into itself")
+		}
+		if err := copyTree(path, dst); err != nil {
+			os.RemoveAll(dst)
+			return FSResult{}, plain(err)
+		}
+		return FSResult{Path: dst}, nil
+	}
 
+	if c.protected(path) {
+		return FSResult{}, errors.New("this folder cannot be changed")
+	}
 	switch req.Op {
 	case "delete":
-		c.log.Info("moving to trash on request", "device", l.Peer.DeviceName, "path", path)
+		c.log.Info("moving to trash", "asked by", from, "path", path)
 		return FSResult{}, desktop.Trash(path)
+	case "remove":
+		return FSResult{}, plain(os.Remove(path))
+	case "purge":
+		c.log.Info("deleting", "asked by", from, "path", path)
+		return FSResult{}, plain(os.RemoveAll(path))
+	case "replace":
+		// What a program does when it saves: the new file takes the place
+		// of the old one in a single step.
+		to := filepath.Clean(req.To)
+		if !filepath.IsAbs(to) || !allowed(to) || c.protected(to) {
+			return FSResult{}, errors.New("not a place that can be written to")
+		}
+		return FSResult{}, plain(os.Rename(path, to))
 	case "rename":
 		if req.To == "" || req.To != filepath.Base(req.To) || strings.ContainsAny(req.To, `/\`) {
 			return FSResult{}, errors.New("not a valid name")
 		}
 		return FSResult{}, moveTo(path, filepath.Join(filepath.Dir(path), req.To))
 	case "move":
-		if !filepath.IsAbs(req.To) {
-			return FSResult{}, errors.New("not a full path")
+		if !filepath.IsAbs(req.To) || !allowed(filepath.Clean(req.To)) {
+			return FSResult{}, errors.New("not a folder that can be moved to")
 		}
-		return FSResult{}, moveTo(path, filepath.Join(filepath.Clean(req.To), filepath.Base(path)))
-	case "download":
-		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
-			return FSResult{}, errors.New("only files can be downloaded, not folders")
+		dst := filepath.Join(filepath.Clean(req.To), filepath.Base(path))
+		if within(dst, path) {
+			return FSResult{}, errors.New("a folder cannot be moved into itself")
 		}
-		go func() {
-			if err := c.sendFile(l, path); err != nil {
-				c.log.Warn("requested file was not sent", "device", l.Peer.DeviceName, "path", path, "err", err)
-			}
-		}()
-		return FSResult{}, nil
+		return FSResult{Path: dst}, moveTo(path, dst)
 	}
 	return FSResult{}, errors.New("unknown file operation")
+}
+
+// protected reports whether path is a folder perekat itself relies on.
+func (c *Core) protected(path string) bool {
+	home, _ := os.UserHomeDir()
+	if path == filepath.Dir(path) || path == home || path == sharesRoot() || path == NetDir() {
+		return true
+	}
+	for _, share := range c.Shares() {
+		if share.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// within reports whether path is dir or lies inside it.
+func within(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// uniquePath returns path, or path with a number added when it is taken.
+func uniquePath(path string) string {
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	candidate := path
+	for i := 1; i < 1000; i++ {
+		if _, err := os.Lstat(candidate); err != nil {
+			break
+		}
+		candidate = fmt.Sprintf("%s (%d)%s", base, i, ext)
+	}
+	return candidate
 }
 
 // moveTo renames without ever replacing something that is already there.
@@ -190,7 +362,65 @@ func moveTo(from, to string) error {
 	if _, err := os.Lstat(to); err == nil {
 		return errors.New("something with this name is already there")
 	}
-	return plain(os.Rename(from, to))
+	err := os.Rename(from, to)
+	if err == nil {
+		return nil
+	}
+	// Another disk: rename cannot cross over, so copy and drop the original.
+	if cerr := copyTree(from, to); cerr != nil {
+		os.RemoveAll(to)
+		return plain(err)
+	}
+	return plain(os.RemoveAll(from))
+}
+
+// copyTree copies a file, or a folder with everything in it.
+func copyTree(from, to string) error {
+	info, err := os.Lstat(from)
+	if err != nil {
+		return err
+	}
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(from)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(target, to)
+	case info.IsDir():
+		if err := os.Mkdir(to, 0o755); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(from)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := copyTree(filepath.Join(from, e.Name()), filepath.Join(to, e.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	case !info.Mode().IsRegular():
+		return nil
+	}
+	src, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(dst, src)
+	if cerr := dst.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		os.Chtimes(to, info.ModTime(), info.ModTime())
+	}
+	return err
 }
 
 // plain strips the operation and the path from a file error, leaving the
@@ -205,6 +435,76 @@ func plain(err error) error {
 		return linkErr.Err
 	}
 	return err
+}
+
+func readChunk(path string, offset int64, length int) ([]byte, error) {
+	if length <= 0 || length > fsChunk {
+		length = fsChunk
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, plain(err)
+	}
+	defer f.Close()
+	buf := make([]byte, length)
+	n, err := f.ReadAt(buf, offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, plain(err)
+	}
+	return buf[:n], nil
+}
+
+func statEntry(path string) (*FSEntry, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if info, err = os.Lstat(path); err != nil {
+			return nil, plain(err)
+		}
+	}
+	return entryOf(path, info), nil
+}
+
+func entryOf(path string, info os.FileInfo) *FSEntry {
+	entry := &FSEntry{Name: filepath.Base(path), Path: path, Dir: info.IsDir(), Modified: info.ModTime().Unix()}
+	if !entry.Dir {
+		entry.Size = info.Size()
+	}
+	return entry
+}
+
+// places lists the folders people look for first, as far as they exist.
+func places() []FSEntry {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	out := []FSEntry{{Name: filepath.Base(home), Path: home, Dir: true, Kind: "home"}}
+	known := []struct{ kind, names string }{
+		{"desktop", "Desktop,Рабочий стол"},
+		{"documents", "Documents,Документы"},
+		{"downloads", "Downloads,Download,Загрузки"},
+		{"pictures", "Pictures,Изображения"},
+		{"camera", "DCIM"},
+		{"music", "Music,Музыка"},
+		{"videos", "Videos,Movies,Видео"},
+	}
+	for _, k := range known {
+		for _, name := range strings.Split(k.names, ",") {
+			path := filepath.Join(home, name)
+			if info, err := os.Stat(path); err == nil && info.IsDir() {
+				out = append(out, FSEntry{Name: name, Path: path, Dir: true, Kind: k.kind})
+				break
+			}
+		}
+	}
+	if roots := desktop.Roots(); len(roots) > 0 {
+		for _, root := range roots {
+			out = append(out, FSEntry{Name: root, Path: root, Dir: true, Kind: "root"})
+		}
+	} else if filepath.Separator == '/' {
+		out = append(out, FSEntry{Name: "/", Path: "/", Dir: true, Kind: "root"})
+	}
+	return out
 }
 
 func listDir(path string) (FSResult, error) {
@@ -253,11 +553,7 @@ func listDir(path string) (FSResult, error) {
 				continue
 			}
 		}
-		entry := FSEntry{Name: e.Name(), Path: full, Dir: info.IsDir(), Modified: info.ModTime().Unix()}
-		if !entry.Dir {
-			entry.Size = info.Size()
-		}
-		res.Entries = append(res.Entries, entry)
+		res.Entries = append(res.Entries, *entryOf(full, info))
 	}
 	sort.SliceStable(res.Entries, func(i, j int) bool {
 		a, b := res.Entries[i], res.Entries[j]

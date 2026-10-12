@@ -22,6 +22,26 @@ const icons = {
   move: icon('<path d="M5 12h14M13 6l6 6-6 6"/>'),
   up: icon('<path d="M12 19V5M6 11l6-6 6 6"/>'),
   back: icon('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
+  forward: icon('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+  grid: icon('<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>'),
+  list: icon('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>'),
+  sort: icon('<path d="M4 7h16M7 12h10M10 17h4"/>'),
+  plus: icon('<path d="M12 5v14M5 12h14"/>'),
+  folderPlus: icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 11v5M9.5 13.5h5"/>'),
+  upload: icon('<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>'),
+  copy: icon('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+  cut: icon('<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M7.5 16L18 4M16.5 16L6 4"/>'),
+  paste: icon('<path d="M9 4h6v3H9zM9 5H6a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3"/>'),
+  home: icon('<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/>'),
+  image: icon('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/>'),
+  video: icon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5v5l4.5-2.500z"/>'),
+  audio: icon('<path d="M9 18V6l10-2v12"/><circle cx="6.500" cy="18" r="2.500"/><circle cx="16.500" cy="16" r="2.500"/>'),
+  share: icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v3M3 7v10a2 2 0 0 0 2 2h6"/><circle cx="18" cy="17" r="3.200"/><path d="M14.800 17h6.400M18 13.800c1.200 1 1.200 5.400 0 6.400M18 13.800c-1.200 1-1.200 5.400 0 6.400"/>'),
+  disk: icon('<rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5.500 13l2-8h9l2 8M7 16.500h.01"/>'),
+  close: icon('<path d="M6 6l12 12M18 6L6 18"/>'),
+  check: icon('<path d="M5 12.500l4.500 4.500L19 7.500"/>'),
+  open: icon('<path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>'),
+  blank: icon(""),
   palette: icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-1.5 1-2 2.2-2H18a3 3 0 0 0 3-3c0-6-4-11-9-11z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/>'),
 };
 
@@ -32,6 +52,7 @@ function h(tag, props, ...children) {
   for (const [key, value] of Object.entries(props || {})) {
     if (key === "class") node.className = value;
     else if (key === "icon") node.innerHTML = icons[value] || icons.desktop;
+    else if (value === null) continue;
     else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
     else if (value !== false && value !== undefined) node.setAttribute(key, value === true ? "" : value);
   }
@@ -126,6 +147,8 @@ function renderSidebar() {
   $("nav-relay").replaceChildren(h("span", { class: "nav-icon", icon: "cloud" }), h("span", { class: "nav-text" }, t("remoteAccess")));
   if (relay && relay.configured) $("nav-relay").append(h("i", { class: "dot" + (relay.connected ? " on" : " bad") }));
   $("nav-relay").classList.toggle("active", view.kind === "relay");
+  $("nav-files").replaceChildren(h("span", { class: "nav-icon", icon: "folder" }), h("span", { class: "nav-text" }, t("actBrowse")));
+  $("nav-files").classList.toggle("active", view.kind === "files");
   $("nav-settings").replaceChildren(h("span", { class: "nav-icon", icon: "settings" }), h("span", { class: "nav-text" }, t("settings")));
   $("nav-settings").classList.toggle("active", view.kind === "settings");
 
@@ -135,7 +158,7 @@ function renderSidebar() {
     ...devices.map((d) =>
       h(
         "button",
-        { class: "device" + ((view.kind === "device" || view.kind === "files") && view.id === d.id ? " active" : ""), onclick: () => show({ kind: "device", id: d.id }) },
+        { class: "device" + (view.kind === "device" && view.id === d.id ? " active" : ""), onclick: () => show({ kind: "device", id: d.id }) },
         tinted(h("span", { class: "device-icon" + (d.paired ? " paired" : ""), icon: d.type }), d.id),
         h("span", { class: "device-text" }, h("span", { class: "device-name" }, d.name), h("span", { class: "device-status" }, h("i", { class: dotClass(d) }), shortStatus(d))),
       ),
@@ -263,168 +286,6 @@ function renderDevice() {
   return tinted(h("div", { class: "page" }, head, body), d.id);
 }
 
-// File browser: the files of another device. It is not redrawn by the
-// periodic refresh, only when a folder is opened or changed.
-
-const files = { result: null, showHidden: false, renaming: null, moving: null };
-
-async function openFolder(path) {
-  try {
-    files.result = await api.FS(view.id, "list", path, "");
-    view.path = files.result.path;
-    files.renaming = null;
-  } catch (err) {
-    toast(String(err), true);
-    if (!files.result) return show({ kind: "device", id: view.id });
-  }
-  if (view.kind === "files") $("view").replaceChildren(renderFiles());
-}
-
-// fileAction changes something on the device and shows the folder again.
-async function fileAction(op, path, to, done) {
-  try {
-    await api.FS(view.id, op, path, to);
-    if (done) toast(done);
-  } catch (err) {
-    toast(String(err), true);
-  }
-  openFolder(view.path);
-}
-
-// A phone has no trash can, so deleting there cannot be undone and takes a
-// second press to confirm.
-const noTrash = () => (state.devices.find((d) => d.id === view.id) || {}).type === "phone";
-let armed = null;
-
-function removeFile(e) {
-  if (!noTrash()) return fileAction("delete", e.path, "", t("trashed"));
-  if (armed !== e.path) {
-    armed = e.path;
-    setTimeout(() => (armed = null), 4000);
-    return toast(t("confirmDelete", e.name), true);
-  }
-  armed = null;
-  fileAction("delete", e.path, "", t("deleted"));
-}
-
-const iconButton = (name, title, action) => h("button", { class: "icon-button", title, icon: name, onclick: action });
-
-function fileRow(e) {
-  const open = () => e.dir && openFolder(e.path);
-  let name = h("span", { class: "file-name" + (e.dir ? " dir" : ""), onclick: open }, e.name);
-  if (files.renaming === e.path) {
-    name = h("input", {
-      class: "file-rename",
-      value: e.name,
-      spellcheck: "false",
-      onkeydown: (ev) => {
-        if (ev.key === "Enter" && ev.target.value.trim() && ev.target.value !== e.name) fileAction("rename", e.path, ev.target.value.trim(), t("renamed"));
-        if (ev.key === "Enter" || ev.key === "Escape") {
-          files.renaming = null;
-          if (ev.key === "Escape" || ev.target.value === e.name) $("view").replaceChildren(renderFiles());
-          ev.stopPropagation();
-        }
-      },
-    });
-    setTimeout(() => name.select(), 0);
-  }
-  return h(
-    "div",
-    { class: "file-row" },
-    h("span", { class: "file-icon" + (e.dir ? " dir" : ""), icon: e.dir ? "folder" : "doc", onclick: open }),
-    name,
-    h("span", { class: "file-meta" }, e.dir ? "" : formatSize(e.size)),
-    h("span", { class: "file-meta" }, new Date(e.modified * 1000).toLocaleDateString(language, { day: "2-digit", month: "short", year: "numeric" })),
-    h(
-      "span",
-      { class: "file-actions" },
-      e.dir ? null : iconButton("download", t("download"), () => fileAction("download", e.path, "", t("downloading"))),
-      iconButton("rename", t("rename"), () => {
-        files.renaming = e.path;
-        $("view").replaceChildren(renderFiles());
-      }),
-      iconButton("move", t("move"), () => {
-        files.moving = { path: e.path, name: e.name };
-        toast(t("moveHint"));
-        $("view").replaceChildren(renderFiles());
-      }),
-      iconButton("trash", t(noTrash() ? "deleteForever" : "toTrash"), () => removeFile(e)),
-    ),
-  );
-}
-
-function renderFiles() {
-  const d = state.devices.find((x) => x.id === view.id);
-  const res = files.result;
-  const entries = res.entries.filter((e) => files.showHidden || !e.name.startsWith("."));
-
-  const toolbar = h(
-    "div",
-    { class: "row toolbar" },
-    h("button", { class: "button", disabled: !res.parent, onclick: () => openFolder(res.parent) }, h("span", { class: "button-icon", icon: "up" }), t("up")),
-    h("button", { class: "button", onclick: () => openFolder(view.path) }, h("span", { class: "button-icon", icon: "refresh" }), t("reload")),
-    h(
-      "button",
-      {
-        class: "button" + (files.showHidden ? " on" : ""),
-        onclick: () => {
-          files.showHidden = !files.showHidden;
-          $("view").replaceChildren(renderFiles());
-        },
-      },
-      t("hidden"),
-    ),
-  );
-  if (files.moving) {
-    const moving = files.moving;
-    toolbar.append(
-      h(
-        "button",
-        {
-          class: "button primary",
-          onclick: () => {
-            files.moving = null;
-            fileAction("move", moving.path, view.path, t("moved"));
-          },
-        },
-        t("pasteHere", moving.name),
-      ),
-      h(
-        "button",
-        {
-          class: "button",
-          onclick: () => {
-            files.moving = null;
-            $("view").replaceChildren(renderFiles());
-          },
-        },
-        t("cancel"),
-      ),
-    );
-  }
-
-  return tinted(
-    h(
-      "div",
-      { class: "page wide" },
-      h(
-        "header",
-        {},
-        iconButton("back", t("backToDevice"), () => show({ kind: "device", id: view.id })),
-        h("div", { class: "head-text" }, h("h1", {}, d ? d.name : ""), h("p", { class: "muted path" }, res.path)),
-      ),
-      h(
-        "div",
-        { class: "body" },
-        toolbar,
-        entries.length ? h("div", { class: "files" }, ...entries.map(fileRow)) : h("p", { class: "muted folder-empty" }, t("emptyFolder")),
-        res.truncated ? h("p", { class: "muted small" }, t("truncated")) : null,
-      ),
-    ),
-    view.id,
-  );
-}
-
 // Remote access view. Its forms are built once, so typing is not disturbed
 // by the periodic refresh; only the status part follows the state.
 
@@ -504,7 +365,13 @@ function commandRow(name, command) {
     { class: "row command-row" },
     h("input", { class: "cmd-name", placeholder: t("cmdName"), value: name, spellcheck: "false" }),
     h("input", { class: "cmd-line", placeholder: t("cmdLine"), value: command, spellcheck: "false" }),
-    h("button", { class: "icon-button", type: "button", title: t("remove"), icon: "trash", onclick: () => row.remove() }),
+    h("button", { class: "icon-button", type: "button", title: t("remove"), icon: "trash", onclick: () => {
+        // Removing a command that was saved takes effect at once, without Save.
+        const form = row.closest("form");
+        row.remove();
+        if (name && form) form.requestSubmit();
+      },
+    }),
   );
   return row;
 }
@@ -640,9 +507,7 @@ async function show(next) {
     $("view").replaceChildren(renderRelay());
     updateRelay();
   } else if (view.kind === "files") {
-    files.result = null;
-    files.moving = null;
-    await openFolder(view.path);
+    await fmShow(view.id, view.path);
   } else if (view.kind === "settings") {
     try {
       $("view").replaceChildren(await renderSettings());
@@ -662,9 +527,10 @@ function render() {
     view.id = best ? best.id : null;
   }
   // The browser closes when its device goes away.
-  if (view.kind === "files" && !state.devices.some((d) => d.id === view.id && d.connected)) {
-    view = { kind: "device", id: view.id };
+  if (view.kind === "files" && view.id !== SELF && !state.devices.some((d) => d.id === view.id && d.connected)) {
+    show({ kind: "files", id: SELF, path: "" });
   }
+  fmState();
   renderSidebar();
   if (view.kind === "device") $("view").replaceChildren(backHome(), renderDevice());
   if (view.kind === "relay") updateRelay();
@@ -697,8 +563,9 @@ async function refresh() {
 
 // The phone's Back button goes up one level here before it leaves the app.
 window.perekatBack = () => {
-  if (view.kind === "files") show({ kind: "device", id: view.id });
-  else if (view.kind !== "home" && narrow.matches) show({ kind: "home" });
+  if (view.kind === "files") {
+    if (!fmBack()) show(narrow.matches ? { kind: "home" } : { kind: "device", id: view.id === SELF ? null : view.id });
+  } else if (view.kind !== "home" && narrow.matches) show({ kind: "home" });
   else return false;
   return true;
 };
@@ -708,6 +575,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && state && state.devices.some((d) => d.remote)) run(() => api.RemoteOff());
 });
 $("refresh").addEventListener("click", () => run(() => api.Refresh()));
+$("nav-files").addEventListener("click", () => show({ kind: "files", id: SELF, path: "" }));
 $("nav-relay").addEventListener("click", () => show({ kind: "relay" }));
 $("nav-settings").addEventListener("click", () => show({ kind: "settings" }));
 
@@ -725,7 +593,6 @@ $("nav-settings").addEventListener("click", () => show({ kind: "settings" }));
   if (first === "relay" || first === "settings") show({ kind: first });
   const usable = first === "device" && state && state.devices.find((d) => d.paired && d.connected);
   if (usable) show({ kind: "device", id: usable.id });
-  const browsable = first === "files" && state && state.devices.find((d) => d.canBrowse && d.connected);
-  if (browsable) show({ kind: "files", id: browsable.id, path: "" });
+  if (first === "files") show({ kind: "files", id: SELF, path: "" });
   setInterval(refresh, 500);
 })();

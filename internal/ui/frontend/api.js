@@ -52,7 +52,10 @@ function httpApi() {
       await call("POST", "/upload" + of(id), form);
       return picked.length;
     },
-    FS: (id, op, path, to) => call("POST", "/fs" + of(id), { op, path, to }),
+    FS: (id, request) => call("POST", "/fs" + of(id), request),
+    FSPaste: (src, paths, dst, dir, move) => call("POST", "/fs/paste", { src, paths, dst, dir, move }),
+    FSOpen: (id, path) => call("POST", "/fs/open" + of(id) + "&path=" + encodeURIComponent(path)),
+    FSUploadForm: (id, dir, form) => call("POST", "/fs/upload" + of(id) + "&dir=" + encodeURIComponent(dir), form),
     Settings: () => call("GET", "/settings"),
     SaveSettings: (settings) => call("PUT", "/settings", settings),
     Commands: () => call("GET", "/commands"),

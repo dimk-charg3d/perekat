@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
@@ -94,10 +96,27 @@ func (a *App) SendFiles(id, title string) (int, error) {
 	return len(paths), a.client.Send(id, paths)
 }
 
-// FS performs a file operation on another device: list, rename, move,
-// delete or download.
-func (a *App) FS(id, op, path, to string) (core.FSResult, error) {
-	return a.client.FS(id, core.FSRequest{Op: op, Path: path, To: to})
+// FS performs a file operation on a device, or on this one when id is "self".
+func (a *App) FS(id string, req core.FSRequest) (core.FSResult, error) {
+	return a.client.FS(id, req)
+}
+
+// FSPaste copies or moves files into a folder, on the same device or another.
+func (a *App) FSPaste(src string, paths []string, dst, dir string, move bool) error {
+	return a.client.FSPaste(ipc.Paste{Src: src, Paths: paths, Dst: dst, Dir: dir, Move: move})
+}
+
+// FSOpen opens a file with the program this machine uses for it.
+func (a *App) FSOpen(id, path string) error { return a.client.FSOpen(id, path) }
+
+// FSUpload asks which files of this machine to put into a folder of a device
+// and returns how many were picked.
+func (a *App) FSUpload(id, dir, title string) (int, error) {
+	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{Title: title})
+	if err != nil || len(paths) == 0 {
+		return 0, err
+	}
+	return len(paths), a.client.FSPaste(ipc.Paste{Src: core.SelfDevice, Paths: paths, Dst: id, Dir: dir})
 }
 
 func (a *App) Settings() (core.Settings, error) { return a.client.Settings() }
@@ -148,13 +167,20 @@ func (a *App) RemoteOff() error { return a.client.RemoteOff() }
 
 func (a *App) Quit() { runtime.Quit(a.ctx) }
 
+// stopped is closed when the daemon inside this process has shut down.
+var stopped = make(chan struct{})
+
 // ensureDaemon starts a daemon in this process unless one already answers.
 func ensureDaemon(ctx context.Context, client *ipc.Client, log *slog.Logger) error {
 	if _, err := client.Self(); err == nil {
+		close(stopped)
 		return nil
 	}
 	failed := make(chan error, 1)
-	go func() { failed <- app.Run(ctx, log) }()
+	go func() {
+		failed <- app.Run(ctx, log)
+		close(stopped)
+	}()
 	for range 50 {
 		select {
 		case err := <-failed:
@@ -173,8 +199,23 @@ func main() {
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	client, err := ipc.NewClient()
+	// The daemon gets to shut down properly, however the window goes away:
+	// it has network folders to unmount.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	shutdown := func() {
+		stop()
+		select {
+		case <-stopped:
+		case <-time.After(3 * time.Second):
+		}
+	}
+	go func() {
+		<-ctx.Done()
+		shutdown()
+		os.Exit(0)
+	}()
 	if err == nil {
-		err = ensureDaemon(context.Background(), client, log)
+		err = ensureDaemon(ctx, client, log)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "perekat:", err)
@@ -189,7 +230,7 @@ func main() {
 		MinWidth:          760,
 		MinHeight:         520,
 		BackgroundColour:  &options.RGBA{R: 0x16, G: 0x18, B: 0x1a, A: 0xff},
-		AssetServer:       &assetserver.Options{Assets: ui.Assets()},
+		AssetServer:       &assetserver.Options{Assets: ui.Assets(), Handler: client.Files()},
 		Bind:              []any{a},
 		HideWindowOnClose: true,
 		OnStartup:         func(ctx context.Context) { a.ctx = ctx },
@@ -203,6 +244,7 @@ func main() {
 			},
 		},
 	})
+	shutdown()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "perekat:", err)
 		os.Exit(1)

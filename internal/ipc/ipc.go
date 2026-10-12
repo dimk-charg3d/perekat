@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,6 +142,63 @@ func Handler(c *core.Core) http.Handler {
 		}
 		json.NewEncoder(w).Encode(res)
 	})
+	mux.HandleFunc("POST /fs/paste", func(w http.ResponseWriter, r *http.Request) {
+		var p Paste
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := c.FSPaste(p.Src, p.Paths, p.Dst, p.Dir, p.Move); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
+	mux.HandleFunc("POST /fs/open", func(w http.ResponseWriter, r *http.Request) {
+		if err := c.FSOpen(r.URL.Query().Get("device"), r.URL.Query().Get("path")); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
+	// raw serves the content of a file, for previews and players; it honours
+	// range requests, so a video can be wound.
+	mux.HandleFunc("GET /fs/raw", func(w http.ResponseWriter, r *http.Request) {
+		file, entry, err := c.FSReader(r.URL.Query().Get("device"), r.URL.Query().Get("path"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.ServeContent(w, r, entry.Name, time.Unix(entry.Modified, 0), file)
+	})
+	mux.HandleFunc("GET /fs/thumb", func(w http.ResponseWriter, r *http.Request) {
+		size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+		res, err := c.FS(r.URL.Query().Get("device"), core.FSRequest{Op: "thumb", Path: r.URL.Query().Get("path"), Length: size})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "private, max-age=600")
+		w.Write(res.Data)
+	})
+	// upload puts files picked in the interface into a folder of a device.
+	mux.HandleFunc("POST /fs/upload", func(w http.ResponseWriter, r *http.Request) {
+		reader, err := r.MultipartReader()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		for {
+			part, err := reader.NextPart()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err == nil && part.FileName() != "" {
+				err = c.FSUpload(r.URL.Query().Get("device"), r.URL.Query().Get("dir"), part.FileName(), 0, part)
+			}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+	})
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(c.Settings())
 	})
@@ -208,7 +266,13 @@ func ServeHTTP(ctx context.Context, ln net.Listener, c *core.Core, token string,
 	}))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Perekat-Token")), []byte(token)) != 1 {
+		given := r.Header.Get("X-Perekat-Token")
+		// A picture or a video is asked for by the page itself, which cannot
+		// add a header, so reading a file may carry the token in the address.
+		if given == "" && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/fs/") {
+			given = r.URL.Query().Get("token")
+		}
+		if subtle.ConstantTimeCompare([]byte(given), []byte(token)) != 1 {
 			http.Error(w, "wrong token", http.StatusForbidden)
 			return
 		}
@@ -333,6 +397,49 @@ func (c *Client) RemoteOff() error {
 func (c *Client) FS(device string, req core.FSRequest) (core.FSResult, error) {
 	var out core.FSResult
 	return out, c.callBody(http.MethodPost, "/fs?device="+url.QueryEscape(device), req, &out)
+}
+
+// Paste describes a copy or a move of files between two devices.
+type Paste struct {
+	Src   string   `json:"src"`
+	Paths []string `json:"paths"`
+	Dst   string   `json:"dst"`
+	Dir   string   `json:"dir"`
+	Move  bool     `json:"move"`
+}
+
+func (c *Client) FSPaste(p Paste) error {
+	return c.callBody(http.MethodPost, "/fs/paste", p, nil)
+}
+
+func (c *Client) FSOpen(device, path string) error {
+	return c.call(http.MethodPost, "/fs/open?device="+url.QueryEscape(device)+"&path="+url.QueryEscape(path), nil)
+}
+
+// Files serves the daemon's calls that return file content, for a page that
+// asks for them under /api/fs/.
+func (c *Client) Files() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "http://perekat"+strings.TrimPrefix(r.URL.Path, "/api")+"?"+r.URL.RawQuery, nil)
+		if err != nil || !strings.HasPrefix(r.URL.Path, "/api/fs/") || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		if rng := r.Header.Get("Range"); rng != "" {
+			req.Header.Set("Range", rng)
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		for name, values := range resp.Header {
+			w.Header()[name] = values
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	})
 }
 
 func (c *Client) Settings() (core.Settings, error) {

@@ -36,6 +36,8 @@ const (
 	// files of another.
 	TypeFSRequest  = "perekat.fs.request"
 	TypeFSResponse = "perekat.fs.response"
+	// TypeShares lists the network folders a device offers.
+	TypeShares = "perekat.shares"
 )
 
 // Capabilities are the packet types perekat both sends and accepts. Other
@@ -45,6 +47,7 @@ var Capabilities = []string{
 	TypeInput,
 	TypeFSRequest,
 	TypeFSResponse,
+	TypeShares,
 	TypeClipboard,
 	TypeClipboardConnect,
 	TypeShare,

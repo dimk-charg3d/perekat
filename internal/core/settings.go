@@ -25,7 +25,7 @@ type Settings struct {
 	// Language of the window: "ru" or "en".
 	Language string `json:"language"`
 	// KDEConnect allows links with devices that run KDE Connect rather than
-	// perekat, such as a phone.
+	// perekat. It is off unless asked for: perekat talks to perekat.
 	KDEConnect bool `json:"kdeConnect"`
 	// FileAccess lets paired devices browse and change the files here.
 	FileAccess bool `json:"fileAccess"`
@@ -39,9 +39,10 @@ type storedSettings struct {
 	DownloadDir   string            `json:"downloadDir,omitempty"`
 	ClipboardOff  bool              `json:"clipboardOff,omitempty"`
 	Language      string            `json:"language,omitempty"`
-	KDEConnectOff bool              `json:"kdeConnectOff,omitempty"`
+	KDEConnectOn  bool              `json:"kdeConnectOn,omitempty"`
 	FileAccessOff bool              `json:"fileAccessOff,omitempty"`
 	Colors        map[string]string `json:"colors,omitempty"`
+	Shares        []Share           `json:"shares,omitempty"`
 }
 
 var colorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
@@ -65,7 +66,7 @@ func (c *Core) Settings() Settings {
 		DownloadDir: c.stored.DownloadDir,
 		Clipboard:   !c.stored.ClipboardOff,
 		Language:    c.stored.Language,
-		KDEConnect:  !c.stored.KDEConnectOff,
+		KDEConnect:  c.stored.KDEConnectOn,
 		FileAccess:  !c.stored.FileAccessOff,
 		Colors:      map[string]string{},
 	}
@@ -105,9 +106,10 @@ func (c *Core) SaveSettings(s Settings) error {
 		DownloadDir:   s.DownloadDir,
 		ClipboardOff:  !s.Clipboard,
 		Language:      s.Language,
-		KDEConnectOff: !s.KDEConnect,
+		KDEConnectOn:  s.KDEConnect,
 		FileAccessOff: !s.FileAccess,
 		Colors:        s.Colors,
+		Shares:        c.stored.Shares,
 	}
 	if s.DownloadDir == desktop.DownloadsDir() {
 		c.stored.DownloadDir = ""
@@ -146,7 +148,7 @@ func (c *Core) SaveSettings(s Settings) error {
 func (c *Core) foreignAllowed() bool {
 	c.settingsMu.Lock()
 	defer c.settingsMu.Unlock()
-	return !c.stored.KDEConnectOff
+	return c.stored.KDEConnectOn
 }
 
 // dropForeignLinks disconnects devices that do not run perekat.

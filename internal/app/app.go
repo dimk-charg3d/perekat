@@ -15,6 +15,7 @@ import (
 	"github.com/charg3d/perekat/internal/input"
 	"github.com/charg3d/perekat/internal/ipc"
 	"github.com/charg3d/perekat/internal/link"
+	"github.com/charg3d/perekat/internal/netfs"
 	"github.com/charg3d/perekat/internal/protocol"
 	"github.com/charg3d/perekat/internal/trust"
 )
@@ -87,6 +88,7 @@ func run(ctx context.Context, log *slog.Logger) (restart bool, err error) {
 		stop()
 	}
 	defer c.Close()
+	defer netfs.Mount(c, log)()
 
 	go c.RunClipboard(ctx)
 	go c.RunBattery(ctx)

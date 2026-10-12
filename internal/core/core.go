@@ -56,6 +56,7 @@ type device struct {
 
 	commands []Command // what the device offers to run
 	battery  *Battery
+	shares   []Share // the network folders the device offers
 }
 
 // DeviceInfo is the externally visible state of one device.
@@ -86,6 +87,8 @@ type DeviceInfo struct {
 	CanRing  bool      `json:"canRing,omitempty"`
 	Commands []Command `json:"commands,omitempty"`
 	Battery  *Battery  `json:"battery,omitempty"`
+	// Shares are the network folders the device offers.
+	Shares []Share `json:"shares,omitempty"`
 }
 
 // remote is an active remote-control session: the local mouse is captured and
@@ -310,6 +313,8 @@ func (c *Core) readLoop(l *link.Link) {
 			c.handleFSRequest(l, p)
 		case protocol.TypeFSResponse:
 			c.handleFSResponse(p)
+		case protocol.TypeShares:
+			c.handleShares(l, p)
 		default:
 			c.log.Debug("unhandled packet", "device", l.Peer.DeviceName, "type", p.Type)
 		}
@@ -478,6 +483,7 @@ func (c *Core) info(id string, d *device) DeviceInfo {
 		CanRing:   paired && accepts(d.identity, protocol.TypeRing),
 		Commands:  d.commands,
 		Battery:   d.battery,
+		Shares:    d.shares,
 	}
 	switch d.state {
 	case pairRequested:
@@ -773,6 +779,7 @@ func (c *Core) greet(l *link.Link) {
 		send(l, protocol.TypeRunRequest, map[string]bool{"requestCommandList": true})
 	}
 	c.sendBattery(l)
+	c.sendShares(l)
 }
 
 // speaksPerekat reports whether the device understands perekat's own packets.

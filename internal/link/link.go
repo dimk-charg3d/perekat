@@ -48,7 +48,12 @@ type Link struct {
 	conn *tls.Conn
 	r    *bufio.Reader
 	wmu  sync.Mutex
+	done chan struct{}
+	once sync.Once
 }
+
+// Done is closed when the link is.
+func (l *Link) Done() <-chan struct{} { return l.done }
 
 // keepAlive notices a peer that vanished (a laptop that left the network)
 // within about twenty seconds, so a link through the relay can replace it.
@@ -155,7 +160,7 @@ func (c Config) secure(tc *tls.Conn, expectID string) (*Link, error) {
 		return fail(fmt.Errorf("certificate is for %q, not %s", certs[0].Subject.CommonName, peer.DeviceID))
 	}
 	tc.SetDeadline(time.Time{})
-	l := &Link{Peer: peer, Cert: certs[0], conn: tc, r: r}
+	l := &Link{Peer: peer, Cert: certs[0], conn: tc, r: r, done: make(chan struct{})}
 	l.Payload = directPayload{l}
 	return l, nil
 }
@@ -257,5 +262,6 @@ func (l *Link) RemoteIP() net.IP {
 }
 
 func (l *Link) Close() error {
+	l.once.Do(func() { close(l.done) })
 	return l.conn.Close()
 }

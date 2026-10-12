@@ -43,11 +43,15 @@ type TransferInfo struct {
 }
 
 func (c *Core) startTransfer(l *link.Link, name string, size int64, incoming bool) *transfer {
+	return c.startTransferFor(l.Peer.DeviceID, l.Peer.DeviceName, name, size, incoming)
+}
+
+func (c *Core) startTransferFor(deviceID, device, name string, size int64, incoming bool) *transfer {
 	c.transferMu.Lock()
 	defer c.transferMu.Unlock()
 	c.transferID++
 	t := &transfer{TransferInfo: TransferInfo{
-		ID: c.transferID, DeviceID: l.Peer.DeviceID, Device: l.Peer.DeviceName, Name: name, Size: size, Incoming: incoming, State: "active",
+		ID: c.transferID, DeviceID: deviceID, Device: device, Name: name, Size: size, Incoming: incoming, State: "active",
 	}}
 	c.transfers = append(c.transfers, t)
 	if extra := len(c.transfers) - keptTransfers; extra > 0 {
