@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/charg3d/perekat/internal/desktop"
+	"github.com/charg3d/perekat/internal/link"
 )
 
 // Work on files that takes a while runs in the background and shows among
@@ -169,7 +171,130 @@ func (c *Core) pasteOne(src, path, dst, dstDir string, move bool, id, device str
 	}
 }
 
+// errNoStream means the other device is too old to send whole files over a
+// side connection, and the content has to go piece by piece.
+var errNoStream = errors.New("no stream")
+
+// offerFile opens a side connection for a file and says where it is.
+func (c *Core) offerFile(l *link.Link, path string) (FSResult, error) {
+	if l == nil {
+		return FSResult{}, errors.New("unknown file operation")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return FSResult{}, plain(err)
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		f.Close()
+		return FSResult{}, errors.New("not a file")
+	}
+	id, wait, _, err := l.Payload.Offer()
+	if err != nil {
+		f.Close()
+		return FSResult{}, err
+	}
+	go func() {
+		defer f.Close()
+		if err := c.links.SendPayload(l, wait, f); err != nil {
+			c.log.Warn("file was not sent", "device", l.Peer.DeviceName, "path", path, "err", err)
+		}
+	}()
+	return FSResult{Port: id, Size: info.Size()}, nil
+}
+
+// acceptFile fills a file from a side connection the other device offers.
+func (c *Core) acceptFile(l *link.Link, path string, port int, size int64) error {
+	if l == nil {
+		return errors.New("unknown file operation")
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return plain(err)
+	}
+	err = c.links.FetchPayload(context.Background(), l, port, f, size)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// streamContent moves a whole file between this device and another one
+// over a side connection, which is many times faster than piece by piece.
+func (c *Core) streamContent(src, from, dst, to string, t *transfer) error {
+	switch {
+	case dst == SelfDevice && src != SelfDevice:
+		l, err := c.pairedLink(src)
+		if err != nil {
+			return err
+		}
+		offer, err := c.FS(src, FSRequest{Op: "send", Path: from})
+		if err != nil {
+			if strings.Contains(err.Error(), "unknown file operation") {
+				return errNoStream
+			}
+			return err
+		}
+		f, err := os.OpenFile(to, os.O_WRONLY|os.O_TRUNC, 0)
+		if err != nil {
+			return err
+		}
+		err = c.links.FetchPayload(context.Background(), l, offer.Port, counter{t: t, w: f}, offer.Size)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		return err
+	case src == SelfDevice && dst != SelfDevice:
+		l, err := c.pairedLink(dst)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(from)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		id, wait, cancel, err := l.Payload.Offer()
+		if err != nil {
+			return err
+		}
+		sent := make(chan error, 1)
+		started := make(chan struct{})
+		go func() {
+			select {
+			case <-started:
+				sent <- c.links.SendPayload(l, wait, counter{t: t, r: f})
+			case <-l.Done():
+				cancel()
+				sent <- errors.New("device is not connected")
+			}
+		}()
+		close(started)
+		_, err = c.FS(dst, FSRequest{Op: "recv", Path: to, Port: id, Size: info.Size()})
+		if err != nil {
+			cancel()
+		}
+		if err != nil && strings.Contains(err.Error(), "unknown file operation") {
+			<-sent
+			t.done.Store(0)
+			return errNoStream
+		}
+		if serr := <-sent; err == nil {
+			err = serr
+		}
+		return err
+	}
+	return errNoStream
+}
+
 func (c *Core) copyContent(src, from, dst, to string, t *transfer) error {
+	if err := c.streamContent(src, from, dst, to, t); !errors.Is(err, errNoStream) {
+		return err
+	}
 	for offset := int64(0); ; {
 		chunk, err := c.FS(src, FSRequest{Op: "read", Path: from, Offset: offset, Length: fsChunk})
 		if err != nil {

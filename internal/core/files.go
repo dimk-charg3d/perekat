@@ -42,6 +42,7 @@ const (
 type FSRequest struct {
 	ID string `json:"id"`
 	// Op is one of: list, stat, places, mkdir, create, read, write, truncate,
+	// send and recv (a whole file over a side connection),
 	// rename, move, copy, replace (rename over), extract, archive, convert, preview.dir, search, props, zip, unzip, delete (to the trash), remove (one file or empty
 	// folder, for good), purge (a whole tree, for good), thumb,
 	// share.create, share.remove.
@@ -55,6 +56,8 @@ type FSRequest struct {
 	Length int    `json:"length,omitempty"`
 	Size   int64  `json:"size,omitempty"`
 	Data   []byte `json:"data,omitempty"`
+	// Port names the side connection that carries a whole file, for recv.
+	Port int `json:"port,omitempty"`
 	// Paths names several files at once, for packing.
 	Paths []string `json:"paths,omitempty"`
 	// Unique makes mkdir and create pick a free name instead of failing or
@@ -86,6 +89,9 @@ type FSResult struct {
 	Entry     *FSEntry  `json:"entry,omitempty"`
 	Data      []byte    `json:"data,omitempty"`
 	Shares    []Share   `json:"shares,omitempty"`
+	// Port and Size describe the side connection a file is offered on.
+	Port int   `json:"port,omitempty"`
+	Size int64 `json:"size,omitempty"`
 	// Count is how many files a folder holds; Free and Total describe the
 	// disk it is on.
 	Count int64 `json:"count,omitempty"`
@@ -97,7 +103,7 @@ type FSResult struct {
 // SelfDevice, and waits for the answer.
 func (c *Core) FS(query string, req FSRequest) (FSResult, error) {
 	if query == SelfDevice {
-		res, err := c.serveFS("", req, true)
+		res, err := c.serveFS(nil, req, true)
 		if res.Entries == nil {
 			res.Entries = []FSEntry{}
 		}
@@ -132,7 +138,7 @@ func (c *Core) FS(query string, req FSRequest) (FSResult, error) {
 	}
 	timeout := fsTimeout
 	switch req.Op {
-	case "copy", "move", "delete", "purge", "zip", "unzip":
+	case "copy", "move", "delete", "purge", "zip", "unzip", "recv":
 		timeout = fsLongTimeout
 	case "convert":
 		timeout = 2 * time.Minute
@@ -173,7 +179,7 @@ func (c *Core) handleFSRequest(l *link.Link, p protocol.Packet) {
 	}
 	// Listing a slow disk must not hold up the other packets of this link.
 	go func() {
-		res, err := c.serveFS(l.Peer.DeviceName, req, false)
+		res, err := c.serveFS(l, req, false)
 		res.ID = req.ID
 		if err != nil {
 			res = FSResult{ID: req.ID, Error: err.Error()}
@@ -187,7 +193,11 @@ func (c *Core) handleFSRequest(l *link.Link, p protocol.Packet) {
 
 // serveFS carries out a request. trusted marks the requests of this device's
 // own user, which no setting restricts.
-func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, error) {
+func (c *Core) serveFS(l *link.Link, req FSRequest, trusted bool) (FSResult, error) {
+	from := ""
+	if l != nil {
+		from = l.Peer.DeviceName
+	}
 	allowed := func(path string) bool {
 		return trusted || c.fileAccess() || c.inShare(path) || within(path, previewDir())
 	}
@@ -237,6 +247,8 @@ func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, erro
 	case "read":
 		data, err := readChunk(path, req.Offset, req.Length)
 		return FSResult{Data: data}, err
+	case "send":
+		return c.offerFile(l, path)
 	case "thumb":
 		data, err := c.thumbnail(path, req.Length)
 		return FSResult{Data: data}, err
@@ -309,6 +321,8 @@ func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, erro
 		return FSResult{}, plain(err)
 	case "truncate":
 		return FSResult{}, plain(os.Truncate(path, req.Size))
+	case "recv":
+		return FSResult{}, c.acceptFile(l, path, req.Port, req.Size)
 	case "copy":
 		if !filepath.IsAbs(req.To) || !allowed(filepath.Clean(req.To)) {
 			return FSResult{}, errors.New("not a folder that can be copied to")

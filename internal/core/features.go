@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charg3d/perekat/internal/clipboard"
@@ -30,6 +32,9 @@ type clipboardBody struct {
 // RunClipboard watches the local clipboard until ctx is cancelled.
 func (c *Core) RunClipboard(ctx context.Context) {
 	start := time.Now()
+	clipboard.OnImage = func(png []byte) {
+		c.localImage(png, time.Since(start) < 500*time.Millisecond)
+	}
 	err := clipboard.Watch(ctx, func(text string) {
 		// What is already in the clipboard at startup is not a fresh copy.
 		c.localClipboard(text, time.Since(start) < 500*time.Millisecond)
@@ -60,6 +65,54 @@ func (c *Core) localClipboard(text string, initial bool) {
 		if accepts(l.Peer, protocol.TypeClipboard) {
 			send(l, protocol.TypeClipboard, clipboardBody{Content: text})
 		}
+	}
+}
+
+// clipImage remembers the last picture that went through the clipboard, so
+// that one set from another device is not sent straight back.
+var clipImage struct {
+	sync.Mutex
+	sum [32]byte
+}
+
+func seenImage(png []byte) bool {
+	sum := sha256.Sum256(png)
+	clipImage.Lock()
+	defer clipImage.Unlock()
+	if sum == clipImage.sum {
+		return true
+	}
+	clipImage.sum = sum
+	return false
+}
+
+func (c *Core) localImage(png []byte, initial bool) {
+	if !c.clipboardEnabled() || seenImage(png) || initial {
+		return
+	}
+	for _, l := range c.pairedLinks() {
+		if accepts(l.Peer, protocol.TypeClipImage) {
+			send(l, protocol.TypeClipImage, map[string]any{"png": png})
+		}
+	}
+}
+
+func (c *Core) handleClipImage(l *link.Link, p protocol.Packet) {
+	var body struct {
+		PNG []byte `json:"png"`
+	}
+	if err := json.Unmarshal(p.Body, &body); err != nil || len(body.PNG) == 0 || !c.clipboardEnabled() || seenImage(body.PNG) {
+		return
+	}
+	if err := clipboard.SetImage(body.PNG); err == nil {
+		return
+	}
+	// A device that cannot hold a picture in its clipboard keeps it as a file.
+	dir := c.downloadDir()
+	os.MkdirAll(dir, 0o755)
+	path := uniquePath(filepath.Join(dir, "Буфер "+time.Now().Format("2006-01-02 15.04.05")+".png"))
+	if os.WriteFile(path, body.PNG, 0o644) == nil {
+		desktop.Notify("Картинка от "+l.Peer.DeviceName, path)
 	}
 }
 

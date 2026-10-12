@@ -318,6 +318,8 @@ func (c *Core) readLoop(l *link.Link) {
 			c.handleFSResponse(p)
 		case protocol.TypeShares:
 			c.handleShares(l, p)
+		case protocol.TypeClipImage:
+			c.handleClipImage(l, p)
 		default:
 			c.log.Debug("unhandled packet", "device", l.Peer.DeviceName, "type", p.Type)
 		}

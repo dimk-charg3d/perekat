@@ -129,3 +129,10 @@ func Set(text string) error {
 	}
 	return nil
 }
+
+// OnImage is never called here: pictures in the clipboard are not read on
+// this system yet.
+var OnImage func(png []byte)
+
+// SetImage reports that this system cannot take a picture into its clipboard.
+func SetImage(png []byte) error { return errors.ErrUnsupported }

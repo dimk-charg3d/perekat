@@ -5,6 +5,7 @@ package clipboard
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
@@ -30,6 +31,10 @@ func Watch(ctx context.Context, onChange func(string)) error {
 	for lines.Scan() {
 		if text, ok := read(); ok {
 			onChange(text)
+		} else if OnImage != nil {
+			if png := readImage(); png != nil {
+				OnImage(png)
+			}
 		}
 	}
 	return cmd.Wait()
@@ -60,6 +65,32 @@ func read() (string, bool) {
 		return "", false
 	}
 	return string(text), true
+}
+
+// OnImage, if set, is called with a copied picture, as PNG, when the
+// clipboard holds a picture and no text: a screenshot, say.
+var OnImage func(png []byte)
+
+// maxImage keeps a huge picture from being carried around.
+const maxImage = 12 << 20
+
+func readImage() []byte {
+	types, err := exec.Command("wl-paste", "--list-types").Output()
+	if err != nil || !strings.Contains("\n"+string(types), "\nimage/png\n") {
+		return nil
+	}
+	png, err := exec.Command("wl-paste", "--type", "image/png").Output()
+	if err != nil || len(png) == 0 || len(png) > maxImage {
+		return nil
+	}
+	return png
+}
+
+// SetImage puts a PNG picture into the clipboard.
+func SetImage(png []byte) error {
+	cmd := exec.Command("wl-copy", "--type", "image/png")
+	cmd.Stdin = bytes.NewReader(png)
+	return cmd.Run()
 }
 
 // Set replaces the clipboard text.
