@@ -11,6 +11,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.content.pm.ShortcutInfo;
+import android.content.pm.ShortcutManager;
+import android.graphics.drawable.Icon;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.ConnectivityManager;
@@ -157,6 +160,7 @@ public class CoreService extends Service {
 
             new Thread(this::serveDaemon, "host").start();
             new Thread(this::reportBattery, "battery").start();
+            new Thread(this::publishDevices, "shortcuts").start();
             getSystemService(ConnectivityManager.class).registerNetworkCallback(
                     new NetworkRequest.Builder().build(), networks);
             int code = daemon.waitFor();
@@ -288,6 +292,44 @@ public class CoreService extends Service {
         }
     }
 
+    /**
+     * Keeps the paired devices published as sharing shortcuts, so the system
+     * offers them by name in its share sheet.
+     */
+    private void publishDevices() {
+        String published = null;
+        while (running) {
+            try {
+                JSONArray devices = new JSONArray(call("GET", "devices", null, 5000));
+                List<ShortcutInfo> shortcuts = new ArrayList<>();
+                StringBuilder now = new StringBuilder();
+                for (int i = 0; i < devices.length() && shortcuts.size() < 4; i++) {
+                    JSONObject d = devices.getJSONObject(i);
+                    if (!d.optBoolean("paired") || d.optBoolean("foreign")) continue;
+                    String id = d.getString("id");
+                    String name = d.getString("name");
+                    now.append(id).append('=').append(name).append(';');
+                    shortcuts.add(new ShortcutInfo.Builder(this, ShareActivity.SHORTCUT_PREFIX + id)
+                            .setShortLabel(name)
+                            .setIcon(Icon.createWithResource(this,
+                                    "phone".equals(d.optString("type")) ? R.drawable.ic_phone : R.drawable.ic_computer))
+                            .setIntent(new Intent(this, ShareActivity.class).setAction(Intent.ACTION_SEND))
+                            .setCategories(Collections.singleton("io.github.charg3d.perekat.category.DEVICE"))
+                            .setLongLived(true)
+                            .setRank(shortcuts.size())
+                            .build());
+                }
+                if (!now.toString().equals(published)) {
+                    getSystemService(ShortcutManager.class).setDynamicShortcuts(shortcuts);
+                    published = now.toString();
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "shortcuts", e);
+            }
+            sleep(20_000);
+        }
+    }
+
     /** Tells the daemon what the user copied. */
     static void clipboardChanged(String text) {
         if (base == null || text == null || text.isEmpty()) return;
@@ -300,12 +342,33 @@ public class CoreService extends Service {
         }).start();
     }
 
-    private static String call(String method, String path, String body, int timeout) throws Exception {
+    /** Waits for the daemon to come up; false if it does not in time. */
+    static boolean waitReady(long millis) {
+        for (long waited = 0; base == null && error == null && waited < millis; waited += 100) sleep(100);
+        return base != null;
+    }
+
+    /** Starts a call to the daemon's local API. */
+    static HttpURLConnection open(String method, String path) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(base + "api/" + path).openConnection();
+        connection.setRequestMethod(method);
+        connection.setRequestProperty("X-Perekat-Token", token);
+        connection.setConnectTimeout(5000);
+        return connection;
+    }
+
+    static String read(InputStream stream) throws Exception {
+        StringBuilder text = new StringBuilder();
+        if (stream == null) return "";
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            for (String line; (line = reader.readLine()) != null; ) text.append(line);
+        }
+        return text.toString();
+    }
+
+    static String call(String method, String path, String body, int timeout) throws Exception {
+        HttpURLConnection connection = open(method, path);
         try {
-            connection.setRequestMethod(method);
-            connection.setRequestProperty("X-Perekat-Token", token);
-            connection.setConnectTimeout(5000);
             connection.setReadTimeout(timeout);
             if (body != null) {
                 connection.setDoOutput(true);
@@ -313,12 +376,8 @@ public class CoreService extends Service {
                     out.write(body.getBytes(StandardCharsets.UTF_8));
                 }
             }
-            StringBuilder answer = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-                for (String line; (line = reader.readLine()) != null; ) answer.append(line);
-            }
-            return answer.toString();
+            if (connection.getResponseCode() != 200) throw new Exception(read(connection.getErrorStream()));
+            return read(connection.getInputStream());
         } finally {
             connection.disconnect();
         }

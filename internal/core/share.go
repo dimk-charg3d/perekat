@@ -269,3 +269,20 @@ func (c *Core) sendFile(l *link.Link, path string) error {
 	}
 	return err
 }
+
+// SendText hands a piece of text to a device: a web link opens there, any
+// other text lands in its clipboard.
+func (c *Core) SendText(query, text string) error {
+	l, err := c.pairedLink(query)
+	if err != nil {
+		return err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return errors.New("nothing to send")
+	}
+	if u, err := url.Parse(text); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && !strings.ContainsAny(text, " \n\t") {
+		return send(l, protocol.TypeShare, map[string]string{"url": text})
+	}
+	return send(l, protocol.TypeShare, map[string]string{"text": text})
+}

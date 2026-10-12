@@ -118,6 +118,13 @@ func Handler(c *core.Core) http.Handler {
 		})
 	}
 	act("POST /ping", func(device string, _ *http.Request) error { return c.Ping(device) })
+	act("POST /text", func(device string, r *http.Request) error {
+		var text string
+		if err := json.NewDecoder(r.Body).Decode(&text); err != nil {
+			return err
+		}
+		return c.SendText(device, text)
+	})
 	act("POST /ring", func(device string, _ *http.Request) error { return c.Ring(device) })
 	act("POST /run", func(device string, r *http.Request) error {
 		return c.Run(device, r.URL.Query().Get("command"))

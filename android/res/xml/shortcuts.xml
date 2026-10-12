@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="files" android:enabled="true" android:icon="@drawable/ic_folder"
+        android:shortcutShortLabel="@string/sc_files">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="io.github.charg3d.perekat"
+            android:targetClass="io.github.charg3d.perekat.MainActivity">
+            <extra android:name="view" android:value="files" />
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="send" android:enabled="true" android:icon="@drawable/ic_send"
+        android:shortcutShortLabel="@string/sc_send">
+        <intent android:action="io.github.charg3d.perekat.PICK" android:targetPackage="io.github.charg3d.perekat"
+            android:targetClass="io.github.charg3d.perekat.ShareActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="clip" android:enabled="true" android:icon="@drawable/ic_clip"
+        android:shortcutShortLabel="@string/sc_clip">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="io.github.charg3d.perekat"
+            android:targetClass="io.github.charg3d.perekat.ClipboardActivity" />
+    </shortcut>
+
+    <!-- Paired devices are published as shortcuts of this category, which
+         puts them straight into the system's share sheet. -->
+    <share-target android:targetClass="io.github.charg3d.perekat.ShareActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="io.github.charg3d.perekat.category.DEVICE" />
+    </share-target>
+</shortcuts>

@@ -64,11 +64,22 @@ public class MainActivity extends Activity {
         getSystemService(ClipboardManager.class).addPrimaryClipChangedListener(copied);
     }
 
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if ("files".equals(intent.getStringExtra("view"))) {
+            web.evaluateJavascript("show({ kind: 'files', id: 'self', path: '' })", null);
+        }
+    }
+
     /** Loads the interface as soon as the daemon reports where it is. */
     private void openWhenReady() {
         String url = CoreService.url;
         if (url != null) {
-            web.loadUrl(url);
+            // A shortcut may ask for a page other than the first one.
+            String page = getIntent().getStringExtra("view");
+            web.loadUrl(page == null ? url : url.replace("/#", "/?view=" + page + "#"));
         } else if (CoreService.error != null) {
             web.loadDataWithBaseURL(null, "<body style='background:#16181a;color:#e5484d;font:16px sans-serif;padding:24px'>"
                     + CoreService.error + "</body>", "text/html", "utf-8", null);

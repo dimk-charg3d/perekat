@@ -5,4 +5,18 @@
     <string name="channel_service">Работа в фоне</string>
     <string name="channel_events">События</string>
     <string name="starting">Запускаю…</string>
+    <string name="sc_files">Проводник</string>
+    <string name="sc_send">Отправить файл</string>
+    <string name="sc_clip">Отправить буфер</string>
+    <string name="tile_clip">Буфер → устройства</string>
+    <string name="share_title">Куда отправить</string>
+    <string name="share_none">Нет сопряжённых устройств в сети</string>
+    <string name="share_sending">Отправляю на %1$s…</string>
+    <string name="share_done">Отправлено на %1$s</string>
+    <string name="share_failed">Не отправлено: %1$s</string>
+    <string name="share_nothing">Нечего отправлять</string>
+    <string name="clip_empty">Буфер обмена пуст</string>
+    <string name="clip_sent">Буфер отправлен на устройства</string>
+    <string name="not_ready">Перекат ещё запускается, попробуйте снова</string>
+    <string name="hide">Скрыть</string>
 </resources>
