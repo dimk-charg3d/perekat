@@ -42,7 +42,7 @@ const (
 type FSRequest struct {
 	ID string `json:"id"`
 	// Op is one of: list, stat, places, mkdir, create, read, write, truncate,
-	// rename, move, copy, replace (rename over), delete (to the trash), remove (one file or empty
+	// rename, move, copy, replace (rename over), extract, archive, convert, preview.dir, delete (to the trash), remove (one file or empty
 	// folder, for good), purge (a whole tree, for good), thumb,
 	// share.create, share.remove.
 	Op   string `json:"op"`
@@ -127,6 +127,8 @@ func (c *Core) FS(query string, req FSRequest) (FSResult, error) {
 	switch req.Op {
 	case "copy", "move", "delete", "purge":
 		timeout = fsLongTimeout
+	case "convert":
+		timeout = 2 * time.Minute
 	}
 	select {
 	case res := <-answer:
@@ -180,7 +182,7 @@ func (c *Core) handleFSRequest(l *link.Link, p protocol.Packet) {
 // own user, which no setting restricts.
 func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, error) {
 	allowed := func(path string) bool {
-		return trusted || c.fileAccess() || c.inShare(path)
+		return trusted || c.fileAccess() || c.inShare(path) || within(path, previewDir())
 	}
 	denied := errors.New("file access is switched off on that device")
 
@@ -191,6 +193,11 @@ func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, erro
 			res.Entries = places()
 		}
 		return res, nil
+	case "preview.dir":
+		if office() == "" {
+			return FSResult{}, errors.New("no LibreOffice on this device")
+		}
+		return FSResult{Path: previewDir()}, os.MkdirAll(previewDir(), 0o700)
 	case "share.create":
 		share, err := c.CreateShare(req.To)
 		return FSResult{Path: share.Path}, err
@@ -226,6 +233,15 @@ func (c *Core) serveFS(from string, req FSRequest, trusted bool) (FSResult, erro
 	case "thumb":
 		data, err := c.thumbnail(path, req.Length)
 		return FSResult{Data: data}, err
+	case "extract":
+		data, err := extractHTML(path)
+		return FSResult{Data: data}, err
+	case "archive":
+		entries, truncated, err := archiveEntries(path)
+		return FSResult{Entries: entries, Truncated: truncated}, err
+	case "convert":
+		pdf, err := convertToPDF(path)
+		return FSResult{Path: pdf}, err
 	}
 
 	// What makes something new.

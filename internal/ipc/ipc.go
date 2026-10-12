@@ -159,6 +159,14 @@ func Handler(c *core.Core) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 	})
+	mux.HandleFunc("POST /fs/preview", func(w http.ResponseWriter, r *http.Request) {
+		p, err := c.FSPreview(r.URL.Query().Get("device"), r.URL.Query().Get("path"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(p)
+	})
 	mux.HandleFunc("POST /fs/open", func(w http.ResponseWriter, r *http.Request) {
 		if err := c.FSOpen(r.URL.Query().Get("device"), r.URL.Query().Get("path")); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -417,6 +425,11 @@ type Paste struct {
 
 func (c *Client) FSPaste(p Paste) error {
 	return c.callBody(http.MethodPost, "/fs/paste", p, nil)
+}
+
+func (c *Client) FSPreview(device, path string) (core.Preview, error) {
+	var out core.Preview
+	return out, c.call(http.MethodPost, "/fs/preview?device="+url.QueryEscape(device)+"&path="+url.QueryEscape(path), &out)
 }
 
 func (c *Client) FSOpen(device, path string) error {

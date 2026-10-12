@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -12,7 +13,12 @@ import (
 	_ "image/png"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Thumbnails are made where the picture is, so that a folder of photos shows
@@ -51,6 +57,10 @@ func (c *Core) thumbnail(path string, size int) ([]byte, error) {
 
 	thumbs.slots <- struct{}{}
 	defer func() { <-thumbs.slots }()
+	if made := toolThumbnail(path, size); made != nil {
+		thumbs.keep(key, made)
+		return made, nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, plain(err)
@@ -72,15 +82,58 @@ func (c *Core) thumbnail(path string, size int) ([]byte, error) {
 	if err := jpeg.Encode(&out, shrink(img, size, orientation), &jpeg.Options{Quality: 80}); err != nil {
 		return nil, err
 	}
-	thumbs.mu.Lock()
-	thumbs.items[key] = out.Bytes()
-	thumbs.order = append(thumbs.order, key)
-	if len(thumbs.order) > thumbKept {
-		delete(thumbs.items, thumbs.order[0])
-		thumbs.order = thumbs.order[1:]
-	}
-	thumbs.mu.Unlock()
+	thumbs.keep(key, out.Bytes())
 	return out.Bytes(), nil
+}
+
+func (t *thumbCache) keep(key string, data []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.items[key] = data
+	t.order = append(t.order, key)
+	if len(t.order) > thumbKept {
+		delete(t.items, t.order[0])
+		t.order = t.order[1:]
+	}
+}
+
+// toolThumbnail pictures the first page of a PDF or a frame of a video with
+// the programs a desktop usually has; nil when it cannot.
+func toolThumbnail(path string, size int) []byte {
+	tmp, err := os.CreateTemp("", "perekat-thumb-*.jpg")
+	if err != nil {
+		return nil
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var cmd *exec.Cmd
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".pdf":
+		tool, err := exec.LookPath("pdftoppm")
+		if err != nil {
+			return nil
+		}
+		cmd = exec.CommandContext(ctx, tool, "-jpeg", "-f", "1", "-l", "1", "-scale-to", strconv.Itoa(size), "-singlefile", path, strings.TrimSuffix(tmp.Name(), ".jpg"))
+	case ".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v":
+		tool, err := exec.LookPath("ffmpeg")
+		if err != nil {
+			return nil
+		}
+		scale := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", size, size)
+		cmd = exec.CommandContext(ctx, tool, "-y", "-loglevel", "error", "-ss", "1", "-i", path, "-frames:v", "1", "-vf", scale, tmp.Name())
+	default:
+		return nil
+	}
+	if cmd.Run() != nil {
+		return nil
+	}
+	data, err := os.ReadFile(tmp.Name())
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	return data
 }
 
 // shrink scales img to fit a square of the given size and turns it the way

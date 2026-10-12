@@ -107,13 +107,15 @@ func (c *Core) sharesChanged() error {
 
 func (c *Core) sendShares(l *link.Link) {
 	if accepts(l.Peer, protocol.TypeShares) {
-		send(l, protocol.TypeShares, map[string]any{"shares": c.Shares()})
+		send(l, protocol.TypeShares, map[string]any{"shares": c.Shares(), "office": office() != ""})
 	}
 }
 
 func (c *Core) handleShares(l *link.Link, p protocol.Packet) {
 	var body struct {
 		Shares []Share `json:"shares"`
+		// Office is set when the device can convert documents for previews.
+		Office bool `json:"office"`
 	}
 	if err := json.Unmarshal(p.Body, &body); err != nil {
 		return
@@ -122,5 +124,6 @@ func (c *Core) handleShares(l *link.Link, p protocol.Packet) {
 	defer c.mu.Unlock()
 	if d := c.devices[l.Peer.DeviceID]; d != nil && d.link == l {
 		d.shares = body.Shares
+		d.office = body.Office
 	}
 }

@@ -41,9 +41,14 @@ const kinds = {
   image: ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif"],
   video: ["mp4", "mkv", "webm", "mov", "avi", "m4v"],
   audio: ["mp3", "ogg", "flac", "wav", "m4a", "opus", "aac"],
-  text: ["txt", "md", "log", "json", "yml", "yaml", "toml", "ini", "conf", "sh", "py", "go", "js", "ts", "css", "html", "xml", "c", "h", "cpp", "rs", "java", "kt", "csv", "desktop"],
+  pdf: ["pdf"],
+  office: ["docx", "pptx", "xlsx", "odt", "odp", "ods", "doc", "ppt", "xls", "rtf"],
+  archive: ["zip", "tar", "tgz", "gz", "jar", "apk"],
+  text: ["txt", "md", "log", "json", "yml", "yaml", "toml", "ini", "conf", "sh", "py", "go", "js", "ts", "jsx", "tsx", "css", "html", "xml", "c", "h", "cpp", "hpp", "rs", "java", "kt", "cs", "php", "rb", "lua", "sql", "csv", "desktop", "mk", "mod", "gradle", "bat", "ps1"],
 };
-const thumbable = ["jpg", "jpeg", "png", "gif"];
+// What a device may be able to picture; where it cannot, the icon stays.
+const thumbable = ["jpg", "jpeg", "png", "gif", "pdf", "mp4", "mkv", "webm", "mov", "avi", "m4v"];
+const typeIcons = { folder: "folder", image: "image", video: "video", audio: "audio", pdf: "pdf", office: "office", archive: "archive", text: "code", doc: "doc" };
 
 function kindOf(e) {
   if (e.dir) return "folder";
@@ -262,7 +267,7 @@ function openEntry(e) {
   if (e.dir) return fmGo(fm.dev, e.path);
   const kind = kindOf(e);
   // The window plays no video itself; the system's player does it better.
-  if (kind === "image" || kind === "text" || (api.web && (kind === "video" || kind === "audio"))) return preview(e);
+  if (kind !== "doc" && (api.web || (kind !== "video" && kind !== "audio"))) return preview(e);
   if (!api.web) return act(() => api.FSOpen(fm.dev, e.path), fm.dev === SELF ? "" : t("opening", e.name));
   toast(t("noPreview"));
 }
@@ -413,18 +418,45 @@ function sortMenu(ev) {
 
 function preview(e) {
   const kind = kindOf(e);
+  const ext = extOf(e.name);
   const url = fileURL("raw", fm.dev, e.path);
-  let body;
-  if (kind === "image") body = h("img", { src: url, alt: "" });
-  else if (kind === "video") body = h("video", { src: url, controls: true, autoplay: true });
-  else if (kind === "audio") body = h("audio", { src: url, controls: true, autoplay: true });
-  else {
-    body = h("pre", {}, "…");
-    fetch(url, { headers: { Range: "bytes=0-262143" } })
-      .then((r) => r.text())
-      .then((text) => (body.textContent = text))
-      .catch((err) => (body.textContent = String(err)));
+  const note = h("span", { class: "fm-preview-note" });
+  const wait = (label) => h("div", { class: "fm-preview-wait" }, h("div", { class: "pulse" }), h("p", { class: "muted" }, label));
+  const failed = (err) => h("p", { class: "bad" }, t("previewFailed") + " " + String(err));
+  const holder = h("div", { class: "fm-preview-body kind-" + kind, onclick: (ev) => ev.target === ev.currentTarget && close() });
+  const put = (node) => document.body.contains(holder) && holder.replaceChildren(node);
+
+  if (kind === "image") holder.append(h("img", { src: url, alt: "" }));
+  else if (kind === "video") holder.append(h("video", { src: url, controls: true, autoplay: true }));
+  else if (kind === "audio") holder.append(h("audio", { src: url, controls: true, autoplay: true }));
+  else if (kind === "pdf") holder.append(pdfView(url, (info) => (note.textContent = info)));
+  else if (kind === "archive") {
+    holder.append(wait(t("loading")));
+    api
+      .FS(fm.dev, { op: "archive", path: e.path })
+      .then((res) => put(archiveView(res)))
+      .catch((err) => put(failed(err)));
+  } else if (kind === "office") {
+    holder.append(wait(t("converting")));
+    api
+      .FSPreview(fm.dev, e.path)
+      .then((p) => {
+        if (p.kind === "pdf") return put(pdfView(fileURL("raw", p.device, p.path), (info) => (note.textContent = info)));
+        note.textContent = t("plainView");
+        put(htmlView(p.html));
+      })
+      .catch((err) => put(failed(err)));
+  } else {
+    holder.append(wait(t("loading")));
+    fetch(url, { headers: { Range: "bytes=0-524287" } })
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.statusText)))
+      .then((text) => {
+        if (e.size > 524288) note.textContent = t("textCut");
+        put(ext === "md" ? markdownView(text) : codeView(text, ext));
+      })
+      .catch((err) => put(failed(err)));
   }
+
   const images = fmEntries().filter((x) => kindOf(x) === "image");
   const step = (by) => {
     const next = images[images.findIndex((x) => x.path === e.path) + by];
@@ -447,13 +479,14 @@ function preview(e) {
       "div",
       { class: "fm-preview-bar" },
       h("span", { class: "fm-preview-name" }, e.name),
+      note,
       kind === "image" && images.length > 1 ? iconButton("back", t("previous"), () => step(-1)) : null,
       kind === "image" && images.length > 1 ? iconButton("forward", t("next"), () => step(1)) : null,
       fm.dev !== SELF ? iconButton("download", t("download"), () => download([e])) : null,
       !api.web ? iconButton("open", t("openExternal"), () => act(() => api.FSOpen(fm.dev, e.path))) : null,
       iconButton("close", t("close"), close),
     ),
-    h("div", { class: "fm-preview-body", onclick: (ev) => ev.target === ev.currentTarget && close() }, body),
+    holder,
   );
   document.querySelectorAll(".fm-preview").forEach((n) => n.remove());
   document.body.append(node);
@@ -601,7 +634,7 @@ function nameNode(e) {
 
 function entryNode(e) {
   const kind = kindOf(e);
-  const iconName = kind === "folder" ? "folder" : kind === "text" ? "doc" : kind;
+  const iconName = typeIcons[kind];
   let picture = h("span", { class: "fm-icon " + kind, icon: iconName });
   if (fm.mode === "grid" && thumbable.includes(extOf(e.name))) {
     const img = h("img", { class: "fm-thumb", loading: "lazy", alt: "", src: fileURL("thumb", fm.dev, e.path, "&size=192&m=" + e.modified) });
@@ -762,7 +795,22 @@ async function fmShow(dev, path) {
   fm.forward = [];
   $("view").replaceChildren(root);
   loadOwnShares();
-  if (!(await fmGo(dev, path || "", false)) && view.kind === "files") show({ kind: narrow.matches ? "home" : "device", id: null });
+  // Asked to show a file: open its folder and the file on top.
+  let file = null;
+  if (path) {
+    try {
+      const stat = await api.FS(dev, { op: "stat", path });
+      if (stat.entry && !stat.entry.dir) {
+        file = stat.entry;
+        const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+        path = path.slice(0, cut) || path.slice(0, cut + 1);
+      }
+    } catch (err) {
+      // The listing below reports it.
+    }
+  }
+  if (!(await fmGo(dev, path || "", false)) && view.kind === "files") return show({ kind: narrow.matches ? "home" : "device", id: null });
+  if (file) preview(file);
 }
 
 // fmState follows the state of the daemon: a finished transfer may have

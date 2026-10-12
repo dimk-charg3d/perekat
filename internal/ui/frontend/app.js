@@ -41,6 +41,10 @@ const icons = {
   close: icon('<path d="M6 6l12 12M18 6L6 18"/>'),
   check: icon('<path d="M5 12.500l4.500 4.500L19 7.500"/>'),
   open: icon('<path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>'),
+  pdf: icon('<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5M8.500 16.500c2-1 3.500-4 3.500-6 0 3 2 5 4 5.500-2.500 0-5 .500-7.500 .500z"/>'),
+  office: icon('<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5M9 12h6M9 15h6M9 18h4"/>'),
+  archive: icon('<path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM12 4v2M12 8v2M12 12v2M10.500 16h3v2h-3z"/>'),
+  code: icon('<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5M10.500 12.500L8.500 15l2 2.500M13.500 12.500l2 2.500-2 2.500"/>'),
   blank: icon(""),
   palette: icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-1.5 1-2 2.2-2H18a3 3 0 0 0 3-3c0-6-4-11-9-11z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/>'),
 };
@@ -593,6 +597,6 @@ $("nav-settings").addEventListener("click", () => show({ kind: "settings" }));
   if (first === "relay" || first === "settings") show({ kind: first });
   const usable = first === "device" && state && state.devices.find((d) => d.paired && d.connected);
   if (usable) show({ kind: "device", id: usable.id });
-  if (first === "files") show({ kind: "files", id: SELF, path: "" });
+  if (first === "files") show({ kind: "files", id: SELF, path: (await api.InitialPath()) || "" });
   setInterval(refresh, 500);
 })();

@@ -57,6 +57,7 @@ type device struct {
 	commands []Command // what the device offers to run
 	battery  *Battery
 	shares   []Share // the network folders the device offers
+	office   bool    // the device can convert documents for previews
 }
 
 // DeviceInfo is the externally visible state of one device.
@@ -89,6 +90,8 @@ type DeviceInfo struct {
 	Battery  *Battery  `json:"battery,omitempty"`
 	// Shares are the network folders the device offers.
 	Shares []Share `json:"shares,omitempty"`
+	// CanConvert is set when the device can convert documents for previews.
+	CanConvert bool `json:"canConvert,omitempty"`
 }
 
 // remote is an active remote-control session: the local mouse is captured and
@@ -469,21 +472,22 @@ func (c *Core) Devices() []DeviceInfo {
 func (c *Core) info(id string, d *device) DeviceInfo {
 	_, paired := c.trust.Get(id)
 	info := DeviceInfo{
-		ID:        id,
-		Name:      d.identity.DeviceName,
-		Type:      d.identity.DeviceType,
-		Addr:      d.addr.String(),
-		Connected: true,
-		Paired:    paired,
-		Relayed:   d.link.Relayed,
-		Foreign:   !speaksPerekat(d.identity),
-		Remote:    c.remote != nil && c.remote.target == id,
-		CanRemote: paired && accepts(d.identity, protocol.TypeInput),
-		CanBrowse: paired && accepts(d.identity, protocol.TypeFSRequest),
-		CanRing:   paired && accepts(d.identity, protocol.TypeRing),
-		Commands:  d.commands,
-		Battery:   d.battery,
-		Shares:    d.shares,
+		ID:         id,
+		Name:       d.identity.DeviceName,
+		Type:       d.identity.DeviceType,
+		Addr:       d.addr.String(),
+		Connected:  true,
+		Paired:     paired,
+		Relayed:    d.link.Relayed,
+		Foreign:    !speaksPerekat(d.identity),
+		Remote:     c.remote != nil && c.remote.target == id,
+		CanRemote:  paired && accepts(d.identity, protocol.TypeInput),
+		CanBrowse:  paired && accepts(d.identity, protocol.TypeFSRequest),
+		CanRing:    paired && accepts(d.identity, protocol.TypeRing),
+		Commands:   d.commands,
+		Battery:    d.battery,
+		Shares:     d.shares,
+		CanConvert: d.office,
 	}
 	switch d.state {
 	case pairRequested:

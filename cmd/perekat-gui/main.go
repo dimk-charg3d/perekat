@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -39,6 +40,7 @@ type App struct {
 	ctx    context.Context
 	client *ipc.Client
 	view   string
+	open   string
 }
 
 // InitialView names the page the window opens on: "", "relay", "settings" or
@@ -105,6 +107,12 @@ func (a *App) FS(id string, req core.FSRequest) (core.FSResult, error) {
 func (a *App) FSPaste(src string, paths []string, dst, dir string, move bool) error {
 	return a.client.FSPaste(ipc.Paste{Src: src, Paths: paths, Dst: dst, Dir: dir, Move: move})
 }
+
+// FSPreview prepares an office document for showing in the window.
+func (a *App) FSPreview(id, path string) (core.Preview, error) { return a.client.FSPreview(id, path) }
+
+// InitialPath is the file or folder the window was asked to open.
+func (a *App) InitialPath() string { return a.open }
 
 // FSOpen opens a file with the program this machine uses for it.
 func (a *App) FSOpen(id, path string) error { return a.client.FSOpen(id, path) }
@@ -196,7 +204,14 @@ func ensureDaemon(ctx context.Context, client *ipc.Client, log *slog.Logger) err
 
 func main() {
 	view := flag.String("view", "", "page to open: relay, settings or files")
+	open := flag.String("open", "", "a file or a folder of this machine to show in the file manager")
 	flag.Parse()
+	if *open != "" {
+		*view = "files"
+		if abs, err := filepath.Abs(*open); err == nil {
+			*open = abs
+		}
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	client, err := ipc.NewClient()
 	// The daemon gets to shut down properly, however the window goes away:
@@ -222,7 +237,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	a := &App{client: client, view: *view}
+	a := &App{client: client, view: *view, open: *open}
 	err = wails.Run(&options.App{
 		Title:             "Перекат",
 		Width:             980,
