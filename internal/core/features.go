@@ -63,7 +63,7 @@ func (c *Core) localClipboard(text string, initial bool) {
 		return
 	}
 	for _, l := range c.pairedLinks() {
-		if accepts(l.Peer, protocol.TypeClipboard) {
+		if accepts(l.Peer, protocol.TypeClipboard) && !c.peerSync(l.Peer.DeviceID).ClipboardOff {
 			send(l, protocol.TypeClipboard, clipboardBody{Content: text})
 		}
 	}
@@ -92,7 +92,7 @@ func (c *Core) localImage(png []byte, initial bool) {
 		return
 	}
 	for _, l := range c.pairedLinks() {
-		if accepts(l.Peer, protocol.TypeClipImage) {
+		if accepts(l.Peer, protocol.TypeClipImage) && !c.peerSync(l.Peer.DeviceID).ClipboardOff {
 			send(l, protocol.TypeClipImage, map[string]any{"png": png})
 		}
 	}
@@ -102,7 +102,7 @@ func (c *Core) handleClipImage(l *link.Link, p protocol.Packet) {
 	var body struct {
 		PNG []byte `json:"png"`
 	}
-	if err := json.Unmarshal(p.Body, &body); err != nil || len(body.PNG) == 0 || !c.clipboardEnabled() || seenImage(body.PNG) {
+	if err := json.Unmarshal(p.Body, &body); err != nil || len(body.PNG) == 0 || !c.clipboardEnabled() || c.peerSync(l.Peer.DeviceID).ClipboardOff || seenImage(body.PNG) {
 		return
 	}
 	if err := clipboard.SetImage(body.PNG); err == nil {
@@ -119,7 +119,7 @@ func (c *Core) handleClipImage(l *link.Link, p protocol.Packet) {
 
 func (c *Core) handleClipboard(l *link.Link, p protocol.Packet) {
 	var body clipboardBody
-	if err := json.Unmarshal(p.Body, &body); err != nil || !c.clipboardEnabled() {
+	if err := json.Unmarshal(p.Body, &body); err != nil || !c.clipboardEnabled() || c.peerSync(l.Peer.DeviceID).ClipboardOff {
 		return
 	}
 	// On connect each side offers what it has; the more recent copy wins.
@@ -393,7 +393,7 @@ func (c *Core) Notified(n Notification) {
 
 func (c *Core) handleNotification(l *link.Link, p protocol.Packet) {
 	var n Notification
-	if err := json.Unmarshal(p.Body, &n); err != nil || (n.Title == "" && n.Text == "") {
+	if err := json.Unmarshal(p.Body, &n); err != nil || (n.Title == "" && n.Text == "") || c.peerSync(l.Peer.DeviceID).NotifyOff {
 		return
 	}
 	title := n.Title

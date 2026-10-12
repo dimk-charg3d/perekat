@@ -198,15 +198,17 @@ func (c *Core) serveFS(l *link.Link, req FSRequest, trusted bool) (FSResult, err
 	if l != nil {
 		from = l.Peer.DeviceName
 	}
+	// File access can be switched off for everybody or for one device.
+	open := trusted || (c.fileAccess() && (l == nil || !c.peerSync(l.Peer.DeviceID).FileAccessOff))
 	allowed := func(path string) bool {
-		return trusted || c.fileAccess() || c.inShare(path) || within(path, previewDir())
+		return open || c.inShare(path) || within(path, previewDir())
 	}
 	denied := errors.New("file access is switched off on that device")
 
 	switch req.Op {
 	case "places":
 		res := FSResult{Shares: c.Shares()}
-		if trusted || c.fileAccess() {
+		if open {
 			res.Entries = places()
 		}
 		return res, nil
@@ -222,7 +224,7 @@ func (c *Core) serveFS(l *link.Link, req FSRequest, trusted bool) (FSResult, err
 		return FSResult{}, c.RemoveShare(req.Path)
 	case "list":
 		if req.Path == "" || req.Path == fsDrives {
-			if !trusted && !c.fileAccess() {
+			if !open {
 				return FSResult{}, denied
 			}
 			return listDir(req.Path)

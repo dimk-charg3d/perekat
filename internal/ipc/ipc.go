@@ -223,6 +223,24 @@ func Handler(c *core.Core) http.Handler {
 			}
 		}
 	})
+	mux.HandleFunc("GET /sync", func(w http.ResponseWriter, r *http.Request) {
+		s, err := c.Sync(r.URL.Query().Get("device"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(s)
+	})
+	mux.HandleFunc("PUT /sync", func(w http.ResponseWriter, r *http.Request) {
+		var s core.SyncSettings
+		err := json.NewDecoder(r.Body).Decode(&s)
+		if err == nil {
+			err = c.SaveSync(r.URL.Query().Get("device"), s)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
 	mux.HandleFunc("GET /version", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(version.Version)
 	})
@@ -449,6 +467,15 @@ type Paste struct {
 
 func (c *Client) FSPaste(p Paste) error {
 	return c.callBody(http.MethodPost, "/fs/paste", p, nil)
+}
+
+func (c *Client) Sync(device string) (core.SyncSettings, error) {
+	var out core.SyncSettings
+	return out, c.call(http.MethodGet, "/sync?device="+url.QueryEscape(device), &out)
+}
+
+func (c *Client) SaveSync(device string, s core.SyncSettings) error {
+	return c.callBody(http.MethodPut, "/sync?device="+url.QueryEscape(device), s, nil)
 }
 
 // UIState returns what the window remembers between runs, as JSON.

@@ -58,6 +58,7 @@ type device struct {
 	battery  *Battery
 	shares   []Share // the network folders the device offers
 	office   bool    // the device can convert documents for previews
+	pointer  bool    // the device can follow its pointer, for a shared mouse
 }
 
 // DeviceInfo is the externally visible state of one device.
@@ -114,6 +115,7 @@ type Core struct {
 	devices map[string]*device
 	dialing map[string]bool
 	remote  *remote
+	kvm     kvm
 
 	injectMu      sync.Mutex
 	injector      input.Injector
@@ -322,6 +324,8 @@ func (c *Core) readLoop(l *link.Link) {
 			c.handleClipImage(l, p)
 		case protocol.TypeNotification:
 			c.handleNotification(l, p)
+		case protocol.TypeKVM:
+			c.handleKVM(l, p)
 		default:
 			c.log.Debug("unhandled packet", "device", l.Peer.DeviceName, "type", p.Type)
 		}
@@ -572,6 +576,7 @@ func (c *Core) handleInput(l *link.Link, p protocol.Packet) {
 	if !c.ensureInjector() || (e.IsMotion() && time.Now().Before(c.injectorReady)) {
 		return
 	}
+	c.noteKey(e)
 	if err := c.injector.Inject(e); err != nil {
 		c.log.Warn("mouse event was not delivered", "err", err)
 	}
@@ -639,7 +644,7 @@ func (c *Core) Remote(query string) (bool, error) {
 		case r.events <- e:
 		default:
 		}
-	})
+	}, func() { go c.leaveRemote(id) })
 	if err != nil {
 		return false, err
 	}
@@ -788,6 +793,7 @@ func (c *Core) greet(l *link.Link) {
 	}
 	c.sendBattery(l)
 	c.sendShares(l)
+	c.greetKVM(l)
 }
 
 // speaksPerekat reports whether the device understands perekat's own packets.

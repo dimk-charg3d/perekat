@@ -650,6 +650,19 @@ input.cmd-name { flex: 0 0 30%; }
 .pdf-page { max-width: 100%; background: #fff; border-radius: 4px; overflow: hidden; }
 .pdf-page canvas { display: block; width: 100%; height: auto; }
 
+/* Sharing with one device */
+.switch-line.off { opacity: 0.55; }
+.desk-setup { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.desk { display: grid; grid-template-columns: 1fr 1.2fr 1fr; grid-template-rows: 54px 76px 54px; gap: 8px; max-width: 460px; }
+.desk-main { grid-column: 2; grid-row: 2; display: grid; place-items: center; padding: 0 8px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-weight: 600; text-align: center; overflow: hidden; }
+.desk-side { border: 1px dashed var(--line); border-radius: 10px; background: none; color: var(--text); font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px; }
+.desk-side:hover { background: var(--hover); }
+.desk-side.active { border: 1px solid var(--accent); background: var(--hover); font-weight: 600; }
+.desk-side.top { grid-column: 2; grid-row: 1; }
+.desk-side.left { grid-column: 1; grid-row: 2; }
+.desk-side.right { grid-column: 3; grid-row: 2; }
+.desk-side.bottom { grid-column: 2; grid-row: 3; }
+
 /* Remote control */
 .pad { display: flex; flex-direction: column; gap: 12px; height: 100%; max-width: 560px; }
 .pad header { margin-bottom: 4px; }

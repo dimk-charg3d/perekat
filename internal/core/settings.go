@@ -47,6 +47,8 @@ type storedSettings struct {
 	FileAccessOff bool              `json:"fileAccessOff,omitempty"`
 	Colors        map[string]string `json:"colors,omitempty"`
 	Shares        []Share           `json:"shares,omitempty"`
+	// Sync is what is shared with each paired device, by device id.
+	Sync map[string]peerSync `json:"sync,omitempty"`
 }
 
 var colorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
@@ -116,6 +118,7 @@ func (c *Core) SaveSettings(s Settings) error {
 		FileAccessOff: !s.FileAccess,
 		Colors:        s.Colors,
 		Shares:        c.stored.Shares,
+		Sync:          c.stored.Sync,
 	}
 	if s.DownloadDir == desktop.DownloadsDir() {
 		c.stored.DownloadDir = ""

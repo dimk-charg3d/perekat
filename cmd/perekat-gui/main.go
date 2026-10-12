@@ -109,6 +109,11 @@ func (a *App) FSPaste(src string, paths []string, dst, dir string, move bool) er
 	return a.client.FSPaste(ipc.Paste{Src: src, Paths: paths, Dst: dst, Dir: dir, Move: move})
 }
 
+// Sync returns what is shared with a device.
+func (a *App) Sync(id string) (core.SyncSettings, error) { return a.client.Sync(id) }
+
+func (a *App) SaveSync(id string, s core.SyncSettings) error { return a.client.SaveSync(id, s) }
+
 // Version is the version of this build.
 func (a *App) Version() string { return version.Version }
 

@@ -55,6 +55,8 @@ function httpApi() {
     Input: (id, events) => call("POST", "/input" + of(id), events),
     FS: (id, request) => call("POST", "/fs" + of(id), request),
     FSPaste: (src, paths, dst, dir, move) => call("POST", "/fs/paste", { src, paths, dst, dir, move }),
+    Sync: (id) => call("GET", "/sync" + of(id)),
+    SaveSync: (id, settings) => call("PUT", "/sync" + of(id), settings),
     Version: () => call("GET", "/version"),
     UIState: async () => JSON.stringify((await call("GET", "/ui")) || {}),
     SaveUIState: (text) => call("PUT", "/ui", JSON.parse(text)),

@@ -111,6 +111,8 @@ func (c *Core) handleShare(l *link.Link, p protocol.Packet) {
 		return
 	}
 	switch {
+	case c.peerSync(l.Peer.DeviceID).FilesOff:
+		c.log.Info("refused what a device sent: receiving from it is switched off", "device", l.Peer.DeviceName)
 	case body.Filename != "" && p.PayloadTransferInfo != nil:
 		go c.receiveFile(l, body.Filename, p.PayloadSize, p.PayloadTransferInfo.Port)
 	case body.Text != "":

@@ -122,6 +122,9 @@ func (sendInputInjector) Inject(e Event) error {
 	if e.Key != "" || e.Text != "" {
 		typeKeys(e)
 	}
+	if e.Code > 0 {
+		pressKey(e.Code, e.Pressed)
+	}
 	if len(inputs) == 0 {
 		return nil
 	}
@@ -158,6 +161,27 @@ var virtualKeys = map[string]uint16{
 	"esc": 0x1B, "backspace": 0x08, "tab": 0x09, "enter": 0x0D, "space": 0x20,
 	"home": 0x24, "up": 0x26, "pageup": 0x21, "left": 0x25, "right": 0x27, "end": 0x23, "down": 0x28, "pagedown": 0x22, "delete": 0x2E,
 	"mute": 0xAD, "voldown": 0xAE, "volup": 0xAF, "next": 0xB0, "playpause": 0xB3, "prev": 0xB1,
+}
+
+const (
+	keyeventfExtended = 0x0001
+	keyeventfScancode = 0x0008
+)
+
+// pressKey puts a key down or lets it go, by its Linux key code.
+func pressKey(code int, pressed bool) {
+	key := keyInput{Type: inputKeyboard, Flags: keyeventfScancode}
+	if scan, ok := extendedScan[uint16(code)]; ok {
+		key.Scan, key.Flags = scan, key.Flags|keyeventfExtended
+	} else if code <= lastPlainKey {
+		key.Scan = uint16(code)
+	} else {
+		return
+	}
+	if !pressed {
+		key.Flags |= keyeventfKeyUp
+	}
+	procSendInput.Call(1, uintptr(unsafe.Pointer(&key)), unsafe.Sizeof(key))
 }
 
 // typeKeys presses a named key or types text, character by character.
@@ -244,11 +268,73 @@ func hookProc(code, wParam, lParam uintptr) uintptr {
 	return blockEvent
 }
 
-// StartCapture swallows local mouse input and reports it to emit. The returned
-// function gives the mouse back. emit runs inside the system input hook and
-// must return quickly.
-func StartCapture(emit func(Event)) (stop func(), err error) {
-	hookOnce.Do(func() { hookCallback = syscall.NewCallback(hookProc) })
+type kbdllHook struct {
+	Vk, Scan, Flags, Time uint32
+	Extra                 uintptr
+}
+
+const (
+	whKeyboardLL  = 13
+	llkhfExtended = 0x01
+	llkhfInjected = 0x10
+	llkhfUp       = 0x80
+)
+
+var (
+	keyCallback uintptr
+	hookEscape  atomic.Pointer[func()]
+	keyWatch    escapeWatch
+	// scanToCode turns an extended scan code back into a Linux key code.
+	scanToCode = map[uint16]int{}
+)
+
+func keyProc(code, wParam, lParam uintptr) uintptr {
+	emit := hookEmit.Load()
+	info := (*kbdllHook)(unsafe.Pointer(lParam))
+	if int32(code) != hookActionCode || emit == nil || info.Flags&llkhfInjected != 0 {
+		r, _, _ := procCallNextHookEx.Call(0, code, wParam, lParam)
+		return r
+	}
+	key := int(info.Scan)
+	if info.Flags&llkhfExtended != 0 {
+		key = scanToCode[uint16(info.Scan)]
+	} else if key > lastPlainKey {
+		key = 0
+	}
+	if key == 0 {
+		return blockEvent
+	}
+	pressed := info.Flags&llkhfUp == 0
+	if keyWatch.key(key, pressed) {
+		(*emit)(Event{Code: key, Pressed: false})
+		if escape := hookEscape.Load(); escape != nil {
+			// The hook must return at once; leaving takes a moment.
+			go (*escape)()
+		}
+		return blockEvent
+	}
+	(*emit)(Event{Code: key, Pressed: pressed})
+	return blockEvent
+}
+
+// StartCapture swallows the local mouse and keyboard and reports what they do
+// to emit. The returned function gives them back. emit runs inside the system
+// input hook and must return quickly. escape is called when the left Ctrl is
+// pressed twice quickly.
+func StartCapture(emit func(Event), escape func()) (stop func(), err error) {
+	hookOnce.Do(func() {
+		hookCallback = syscall.NewCallback(hookProc)
+		keyCallback = syscall.NewCallback(keyProc)
+		for code, scan := range extendedScan {
+			scanToCode[scan] = int(code)
+		}
+	})
+	keyWatch = escapeWatch{}
+	if escape != nil {
+		hookEscape.Store(&escape)
+	} else {
+		hookEscape.Store(nil)
+	}
 
 	ready := make(chan error, 1)
 	done := make(chan struct{})
@@ -273,6 +359,11 @@ func StartCapture(emit func(Event)) (stop func(), err error) {
 			hookEmit.Store(nil)
 			ready <- err
 			return
+		}
+		// The keyboard goes the same way; without it the mouse still works.
+		keys, _, _ := procSetWindowsHookEx.Call(whKeyboardLL, keyCallback, 0, 0)
+		if keys != 0 {
+			defer procUnhookWindowsHookEx.Call(keys)
 		}
 		ready <- nil
 

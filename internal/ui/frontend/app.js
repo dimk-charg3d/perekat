@@ -55,6 +55,7 @@ const icons = {
   volup: icon('<path d="M4 9v6h4l5 4V5L8 9zM17 9v6M14 12h6"/>'),
   voldown: icon('<path d="M4 9v6h4l5 4V5L8 9zM15 12h5"/>'),
   mute: icon('<path d="M4 9v6h4l5 4V5L8 9zM16 9.500l5 5M21 9.500l-5 5"/>'),
+  sync: icon('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),
   blank: icon(""),
   palette: icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-1.5 1-2 2.2-2H18a3 3 0 0 0 3-3c0-6-4-11-9-11z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/>'),
 };
@@ -174,7 +175,7 @@ function renderSidebar() {
     ...devices.map((d) =>
       h(
         "button",
-        { class: "device" + (view.kind === "device" && view.id === d.id ? " active" : ""), onclick: () => show({ kind: "device", id: d.id }) },
+        { class: "device" + ((view.kind === "device" || view.kind === "sync") && view.id === d.id ? " active" : ""), onclick: () => show({ kind: "device", id: d.id }) },
         tinted(h("span", { class: "device-icon" + (d.paired ? " paired" : ""), icon: d.type }), d.id),
         h("span", { class: "device-text" }, h("span", { class: "device-name" }, d.name), h("span", { class: "device-status" }, h("i", { class: dotClass(d) }), shortStatus(d))),
       ),
@@ -285,6 +286,7 @@ function renderDevice() {
       ),
       tile("ping", t("actPing"), t("actPingSub"), () => run(() => api.Ping(d.id), t("pingSent"))),
     );
+    tiles.append(tile("sync", t("actSync"), t("actSyncSub"), () => show({ kind: "sync", id: d.id })));
     if (d.canBrowse) tiles.append(tile("folder", t("actBrowse"), t("actBrowseSub"), () => show({ kind: "files", id: d.id, path: "" })));
     if (d.canRing) tiles.append(tile("ring", t("actRing"), t("actRingSub"), () => run(() => api.Ring(d.id), t("ringSent"))));
     body.append(tiles);
@@ -545,6 +547,15 @@ async function show(next) {
     updateRelay();
   } else if (view.kind === "files") {
     await fmShow(view.id, view.path);
+  } else if (view.kind === "sync") {
+    const d = state.devices.find((x) => x.id === view.id);
+    if (!d) return show({ kind: "device", id: view.id });
+    try {
+      $("view").replaceChildren(await renderSync(d));
+    } catch (err) {
+      toast(String(err), true);
+      return show({ kind: "device", id: view.id });
+    }
   } else if (view.kind === "pad") {
     const d = state.devices.find((x) => x.id === view.id);
     if (!d || !d.connected) return show({ kind: "device", id: view.id });
@@ -604,7 +615,7 @@ async function refresh() {
 
 // The phone's Back button goes up one level here before it leaves the app.
 window.perekatBack = () => {
-  if (view.kind === "pad") show({ kind: "device", id: view.id });
+  if (view.kind === "pad" || view.kind === "sync") show({ kind: "device", id: view.id });
   else if (view.kind === "files") {
     if (!fmBack()) show(narrow.matches ? { kind: "home" } : { kind: "device", id: view.id === SELF ? null : view.id });
   } else if (view.kind !== "home" && narrow.matches) show({ kind: "home" });

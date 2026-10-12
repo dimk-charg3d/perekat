@@ -1,5 +1,5 @@
-// Package input captures the local mouse and replays mouse events received
-// from another device.
+// Package input captures the local mouse and keyboard and replays the events
+// received from another device.
 package input
 
 // Event is one mouse action: a movement, a wheel step or a button change.
@@ -12,6 +12,9 @@ type Event struct {
 	// Button is "left", "right", "middle", "back" or "forward".
 	Button  string `json:"button,omitempty"`
 	Pressed bool   `json:"pressed,omitempty"`
+	// Code is a key going down or up, as a Linux key code: what a keyboard
+	// shared between two computers sends.
+	Code int `json:"code,omitempty"`
 	// Key is a key to press and let go, by name: see Keys.
 	Key string `json:"key,omitempty"`
 	// Text is typed as it is, whatever the keyboard layout.
@@ -27,7 +30,7 @@ var Keys = map[string]uint16{
 
 // IsMotion reports whether the event only moves the pointer or the wheel.
 func (e Event) IsMotion() bool {
-	return e.Button == "" && e.Key == "" && e.Text == ""
+	return e.Button == "" && e.Key == "" && e.Text == "" && e.Code == 0
 }
 
 // Injector replays events on this machine.

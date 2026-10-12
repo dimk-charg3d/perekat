@@ -117,8 +117,10 @@ func NewInjector() (Injector, error) {
 		{uiSetKeyBit, btnSide}, {uiSetKeyBit, btnExtra},
 		{uiSetRelBit, relX}, {uiSetRelBit, relY}, {uiSetRelBit, relWheel}, {uiSetRelBit, relHWheel},
 	}
-	// The keys a phone used as a remote control may press.
-	for _, code := range Keys {
+	// Every key of a keyboard, for a keyboard shared with another computer;
+	// the kernel repeats the ones held down.
+	steps = append(steps, struct{ req, arg uintptr }{uiSetEvBit, evRep})
+	for code := 1; code <= maxKey; code++ {
 		steps = append(steps, struct{ req, arg uintptr }{uiSetKeyBit, uintptr(code)})
 	}
 	steps = append(steps,
@@ -158,6 +160,13 @@ func (u *uinputInjector) Inject(e Event) error {
 		// Typing text needs the layout worked out; wtype does that.
 		go exec.Command("wtype", "--", e.Text).Run()
 	}
+	if e.Code > 0 && e.Code <= maxKey {
+		pressed := 0
+		if e.Pressed {
+			pressed = 1
+		}
+		add(evKey, uint16(e.Code), pressed)
+	}
 	if code, ok := Keys[e.Key]; ok {
 		add(evKey, code, 1)
 		add(evSyn, 0, 0)
@@ -184,12 +193,23 @@ const (
 	kindNone deviceKind = iota
 	kindMouse
 	kindTouchpad
+	kindKeyboard
 )
 
-// StartCapture takes exclusive hold of every mouse and touchpad, so they stop
-// moving the local pointer, and reports what they do to emit. The returned
-// function gives the devices back.
-func StartCapture(emit func(Event)) (stop func(), err error) {
+const (
+	evRep = 0x14
+	// maxKey is the last code of a keyboard key; above it come buttons.
+	maxKey   = 248
+	keyA     = 30
+	keyEnter = 28
+)
+
+// StartCapture takes exclusive hold of every mouse, touchpad and keyboard, so
+// they stop acting on this machine, and reports what they do to emit. The
+// returned function gives the devices back. escape is called when the left
+// Ctrl is pressed twice quickly: the way out that needs nothing but the
+// keyboard.
+func StartCapture(emit func(Event), escape func()) (stop func(), err error) {
 	paths, _ := filepath.Glob("/dev/input/event*")
 	var files []*os.File
 	var lastErr error
@@ -210,6 +230,10 @@ func StartCapture(emit func(Event)) (stop func(), err error) {
 			continue
 		}
 		files = append(files, f)
+		if kind == kindKeyboard {
+			go readKeyboard(f, emit, escape)
+			continue
+		}
 		go readDevice(f, kind, scale, emit)
 	}
 	if len(files) == 0 {
@@ -253,7 +277,34 @@ func classify(f *os.File) (deviceKind, float64) {
 	if hasBit(rel[:], relX) && hasBit(rel[:], relY) && hasBit(keys[:], btnLeft) {
 		return kindMouse, 0
 	}
+	if hasBit(keys[:], keyA) && hasBit(keys[:], keyEnter) {
+		return kindKeyboard, 0
+	}
 	return kindNone, 0
+}
+
+func readKeyboard(f *os.File, emit func(Event), escape func()) {
+	var watch escapeWatch
+	buf := make([]byte, rawEventSize*64)
+	for {
+		n, err := f.Read(buf)
+		if err != nil {
+			return
+		}
+		for off := 0; off+rawEventSize <= n; off += rawEventSize {
+			ev := (*rawEvent)(unsafe.Pointer(&buf[off]))
+			if ev.Type != evKey || ev.Code > maxKey {
+				continue
+			}
+			if watch.key(int(ev.Code), ev.Value != 0) && escape != nil {
+				// Let the key go on the other machine before leaving it.
+				emit(Event{Code: int(ev.Code), Pressed: false})
+				escape()
+				continue
+			}
+			emit(Event{Code: int(ev.Code), Pressed: ev.Value != 0})
+		}
+	}
 }
 
 func readDevice(f *os.File, kind deviceKind, scale float64, emit func(Event)) {

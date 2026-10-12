@@ -40,6 +40,8 @@ const (
 	TypeClipImage = "perekat.clipboard.image"
 	// TypeNotification passes on a notification shown on a phone.
 	TypeNotification = "perekat.notification"
+	// TypeKVM coordinates a mouse and keyboard shared by two computers.
+	TypeKVM = "perekat.kvm"
 	// TypeShares lists the network folders a device offers.
 	TypeShares = "perekat.shares"
 )
@@ -52,6 +54,7 @@ var Capabilities = []string{
 	TypeFSRequest,
 	TypeFSResponse,
 	TypeShares,
+	TypeKVM,
 	TypeNotification,
 	TypeClipImage,
 	TypeClipboard,
