@@ -38,11 +38,16 @@ func Shell(command string) *exec.Cmd {
 	return exec.Command("sh", "-c", command)
 }
 
-// Ring plays a sound that helps find this machine.
+// Ring plays a sound that helps find this machine: a ringing phone, a few
+// times over, loud enough to be heard from the next room.
 func Ring() {
 	sound := "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
-	if exec.Command("canberra-gtk-play", "--id=phone-incoming-call").Run() != nil {
-		exec.Command("paplay", sound).Run()
+	for range 4 {
+		if exec.Command("canberra-gtk-play", "--id=phone-incoming-call", "--volume=6").Run() != nil &&
+			exec.Command("pw-play", sound).Run() != nil &&
+			exec.Command("paplay", sound).Run() != nil {
+			return
+		}
 	}
 }
 

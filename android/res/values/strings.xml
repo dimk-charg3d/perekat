@@ -19,4 +19,7 @@
     <string name="clip_sent">Буфер отправлен на устройства</string>
     <string name="not_ready">Перекат ещё запускается, попробуйте снова</string>
     <string name="hide">Скрыть</string>
+    <string name="channel_find">Поиск телефона</string>
+    <string name="ring_title">Телефон ищут</string>
+    <string name="ring_text">Нажмите, чтобы выключить звук</string>
 </resources>

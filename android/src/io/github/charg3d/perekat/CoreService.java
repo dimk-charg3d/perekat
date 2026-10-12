@@ -17,7 +17,9 @@ import android.provider.OpenableColumns;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.drawable.Icon;
-import android.media.Ringtone;
+import android.media.AudioAttributes;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
@@ -30,6 +32,8 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -61,6 +65,9 @@ public class CoreService extends Service {
     private static final String CHANNEL_SERVICE = "service";
     private static final String CHANNEL_EVENTS = "events";
     static final String ACTION_SHARE = "io.github.charg3d.perekat.SHARE";
+    private static final String ACTION_STOP_RING = "io.github.charg3d.perekat.STOP_RING";
+    private static final String CHANNEL_FIND = "find";
+    private static final int RING_NOTIFICATION = 2;
 
     /** Address of the interface, set once the daemon is up. */
     static volatile String url;
@@ -81,6 +88,8 @@ public class CoreService extends Service {
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel(
                 CHANNEL_SERVICE, getString(R.string.channel_service), NotificationManager.IMPORTANCE_LOW));
+        manager.createNotificationChannel(new NotificationChannel(
+                CHANNEL_FIND, getString(R.string.channel_find), NotificationManager.IMPORTANCE_HIGH));
         manager.createNotificationChannel(new NotificationChannel(
                 CHANNEL_EVENTS, getString(R.string.channel_events), NotificationManager.IMPORTANCE_DEFAULT));
 
@@ -105,6 +114,9 @@ public class CoreService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_STOP_RING.equals(intent.getAction())) {
+            main.post(this::stopRing);
+        }
         if (intent != null && ACTION_SHARE.equals(intent.getAction())) {
             new Thread(() -> share(intent), "share").start();
         }
@@ -222,6 +234,7 @@ public class CoreService extends Service {
     public void onDestroy() {
         running = false;
         if (daemon != null) daemon.destroy();
+        stopRing();
         if (multicast != null && multicast.isHeld()) multicast.release();
         try {
             getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networks);
@@ -373,11 +386,79 @@ public class CoreService extends Service {
         }
     }
 
+    private MediaPlayer ringing;
+    private int alarmVolume = -1;
+
+    /**
+     * Makes the phone heard so that it can be found: the alarm sound at full
+     * volume, which a silenced phone plays too, and vibration. It stops by
+     * itself, or when its notification is touched.
+     */
     private void ring() {
-        Ringtone ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
-        if (ringtone == null) return;
-        ringtone.play();
-        main.postDelayed(ringtone::stop, 6000);
+        stopRing();
+        try {
+            AudioManager audio = getSystemService(AudioManager.class);
+            alarmVolume = audio.getStreamVolume(AudioManager.STREAM_ALARM);
+            audio.setStreamVolume(AudioManager.STREAM_ALARM, audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
+            Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+            if (sound == null) sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            MediaPlayer player = new MediaPlayer();
+            player.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
+            player.setDataSource(this, sound);
+            player.setLooping(true);
+            player.prepare();
+            player.start();
+            ringing = player;
+        } catch (Exception e) {
+            Log.w(TAG, "ring", e);
+        }
+        try {
+            getSystemService(Vibrator.class).vibrate(VibrationEffect.createWaveform(new long[]{0, 700, 500}, 0));
+        } catch (Exception e) {
+            Log.w(TAG, "vibrate", e);
+        }
+        PendingIntent stop = PendingIntent.getService(this, 1,
+                new Intent(this, CoreService.class).setAction(ACTION_STOP_RING), PendingIntent.FLAG_IMMUTABLE);
+        getSystemService(NotificationManager.class).notify(RING_NOTIFICATION,
+                new Notification.Builder(this, CHANNEL_FIND)
+                        .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                        .setContentTitle(getString(R.string.ring_title))
+                        .setContentText(getString(R.string.ring_text))
+                        .setContentIntent(stop)
+                        .setDeleteIntent(stop)
+                        .setCategory(Notification.CATEGORY_ALARM)
+                        .setAutoCancel(true)
+                        .build());
+        main.removeCallbacks(stopRinging);
+        main.postDelayed(stopRinging, 30_000);
+    }
+
+    private final Runnable stopRinging = this::stopRing;
+
+    private void stopRing() {
+        main.removeCallbacks(stopRinging);
+        if (ringing != null) {
+            try {
+                ringing.stop();
+                ringing.release();
+            } catch (Exception ignored) {
+                // It had stopped already.
+            }
+            ringing = null;
+        }
+        if (alarmVolume >= 0) {
+            getSystemService(AudioManager.class).setStreamVolume(AudioManager.STREAM_ALARM, alarmVolume, 0);
+            alarmVolume = -1;
+        }
+        try {
+            getSystemService(Vibrator.class).cancel();
+        } catch (Exception ignored) {
+            // No vibrator.
+        }
+        getSystemService(NotificationManager.class).cancel(RING_NOTIFICATION);
     }
 
     private void reportBattery() {
