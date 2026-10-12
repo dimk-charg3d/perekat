@@ -119,6 +119,9 @@ func (sendInputInjector) Inject(e Event) error {
 	case "forward":
 		add(mouseInput{MouseData: xbutton2, Flags: down(e.Pressed, mouseeventfXDown, mouseeventfXUp)})
 	}
+	if e.Key != "" || e.Text != "" {
+		typeKeys(e)
+	}
 	if len(inputs) == 0 {
 		return nil
 	}
@@ -130,6 +133,49 @@ func (sendInputInjector) Inject(e Event) error {
 }
 
 func (sendInputInjector) Close() error { return nil }
+
+// keyInput is the keyboard form of the INPUT structure.
+type keyInput struct {
+	Type  uint32
+	_     uint32
+	Vk    uint16
+	Scan  uint16
+	Flags uint32
+	Time  uint32
+	_     uint32
+	Extra uintptr
+	_     [8]byte
+}
+
+const (
+	inputKeyboard    = 1
+	keyeventfKeyUp   = 0x0002
+	keyeventfUnicode = 0x0004
+)
+
+// virtualKeys are the Windows codes of the keys that can be pressed by name.
+var virtualKeys = map[string]uint16{
+	"esc": 0x1B, "backspace": 0x08, "tab": 0x09, "enter": 0x0D, "space": 0x20,
+	"home": 0x24, "up": 0x26, "pageup": 0x21, "left": 0x25, "right": 0x27, "end": 0x23, "down": 0x28, "pagedown": 0x22, "delete": 0x2E,
+	"mute": 0xAD, "voldown": 0xAE, "volup": 0xAF, "next": 0xB0, "playpause": 0xB3, "prev": 0xB1,
+}
+
+// typeKeys presses a named key or types text, character by character.
+func typeKeys(e Event) {
+	var keys []keyInput
+	if vk, ok := virtualKeys[e.Key]; ok {
+		keys = append(keys, keyInput{Type: inputKeyboard, Vk: vk}, keyInput{Type: inputKeyboard, Vk: vk, Flags: keyeventfKeyUp})
+	}
+	for _, unit := range syscall.StringToUTF16(e.Text) {
+		if unit == 0 {
+			break
+		}
+		keys = append(keys, keyInput{Type: inputKeyboard, Scan: unit, Flags: keyeventfUnicode}, keyInput{Type: inputKeyboard, Scan: unit, Flags: keyeventfUnicode | keyeventfKeyUp})
+	}
+	if len(keys) > 0 {
+		procSendInput.Call(uintptr(len(keys)), uintptr(unsafe.Pointer(&keys[0])), unsafe.Sizeof(keys[0]))
+	}
+}
 
 type msllHook struct {
 	Pt        point

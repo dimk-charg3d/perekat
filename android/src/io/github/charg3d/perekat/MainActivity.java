@@ -153,6 +153,12 @@ public class MainActivity extends Activity {
     }
 
     private class Bridge {
+        /** Opens the system screen where access to notifications is given. */
+        @JavascriptInterface
+        public void notificationAccess() {
+            main.post(() -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        }
+
         @JavascriptInterface
         public void quit() {
             main.post(() -> {

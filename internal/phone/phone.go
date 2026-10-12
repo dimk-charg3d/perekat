@@ -68,13 +68,13 @@ func Run(ctx context.Context, log *slog.Logger, configDir, downloadDir, deviceNa
 			announced = true
 			fmt.Printf("http://%s/#%s\n", addr, token)
 		}
-		return ipc.ServeHTTP(ctx, ln, c, token, ui.Assets(), hostRoutes(c.Refresh))
+		return ipc.ServeHTTP(ctx, ln, c, token, ui.Assets(), hostRoutes(c))
 	}
 	return app.Run(ctx, log)
 }
 
 // hostRoutes are the calls the application makes on its own behalf.
-func hostRoutes(refresh func()) http.Handler {
+func hostRoutes(c *core.Core) http.Handler {
 	mux := http.NewServeMux()
 	// next hands over one thing to do, or nothing after a while, so the
 	// application can keep a request open instead of polling.
@@ -100,6 +100,13 @@ func hostRoutes(refresh func()) http.Handler {
 			phonehost.SetBattery(b.Charge, b.Charging)
 		}
 	})
+	// notification passes on a notification the phone has shown.
+	mux.HandleFunc("POST /host/notification", func(w http.ResponseWriter, r *http.Request) {
+		var n core.Notification
+		if json.NewDecoder(r.Body).Decode(&n) == nil {
+			c.Notified(n)
+		}
+	})
 	// network lists the phone's addresses, as "address/prefix length".
 	mux.HandleFunc("POST /host/network", func(w http.ResponseWriter, r *http.Request) {
 		var list []string
@@ -107,7 +114,7 @@ func hostRoutes(refresh func()) http.Handler {
 			return
 		}
 		SetNetworks(list)
-		refresh()
+		c.Refresh()
 	})
 	return mux
 }

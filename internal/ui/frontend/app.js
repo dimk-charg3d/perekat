@@ -49,6 +49,12 @@ const icons = {
   star: icon('<path d="M12 3.500l2.600 5.400 5.900 .800-4.300 4.100 1 5.900-5.200-2.800-5.200 2.800 1-5.900-4.300-4.100 5.900-.800z"/>'),
   info: icon('<circle cx="12" cy="12" r="9"/><path d="M12 11v5.500M12 7.500v.010"/>'),
   split: icon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
+  play: icon('<path d="M6 4.500v15l8-7.500zM16 5v14M20 5v14"/>'),
+  next: icon('<path d="M5 5v14l10-7zM19 5v14"/>'),
+  prev: icon('<path d="M19 5v14L9 12zM5 5v14"/>'),
+  volup: icon('<path d="M4 9v6h4l5 4V5L8 9zM17 9v6M14 12h6"/>'),
+  voldown: icon('<path d="M4 9v6h4l5 4V5L8 9zM15 12h5"/>'),
+  mute: icon('<path d="M4 9v6h4l5 4V5L8 9zM16 9.500l5 5M21 9.500l-5 5"/>'),
   blank: icon(""),
   palette: icon('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-1.5 1-2 2.2-2H18a3 3 0 0 0 3-3c0-6-4-11-9-11z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/>'),
 };
@@ -267,6 +273,7 @@ function renderDevice() {
   } else {
     const tiles = h("div", { class: "tiles" });
     if (d.canRemote && !api.web) tiles.append(tile("remote", t("actRemote"), t("actRemoteSub"), () => run(() => api.Remote(d.id)), true));
+    if (d.canRemote && api.web) tiles.append(tile("remote", t("actPad"), t("actPadSub"), () => show({ kind: "pad", id: d.id }), true));
     tiles.append(
       tile("file", t("actFile"), t("actFileSub"), () =>
         run(
@@ -477,6 +484,17 @@ async function renderSettings() {
     h("div", { class: "row between" }, h("div", { class: "segments" }, langButton("ru", "Русский"), langButton("en", "English")), h("button", { class: "button primary" }, t("save"))),
   );
 
+  const phoneCard =
+    window.Android && window.Android.notificationAccess
+      ? h(
+          "div",
+          { class: "card" },
+          h("h2", {}, t("notifyTitle")),
+          h("p", { class: "muted small" }, t("notifyHint")),
+          h("div", { class: "row" }, h("button", { type: "button", class: "button", onclick: () => window.Android.notificationAccess() }, t("notifyOpen"))),
+        )
+      : null;
+
   const rows = h("div", { id: "command-rows" }, ...Object.entries(commands).sort().map(([name, command]) => commandRow(name, command)));
   const commandsCard = h(
     "form",
@@ -507,7 +525,7 @@ async function renderSettings() {
     "div",
     { class: "page" },
     h("header", {}, h("span", { class: "head-icon", icon: "settings" }), h("div", { class: "head-text" }, h("h1", {}, t("settings")))),
-    h("div", { class: "body" }, general, commandsCard, quit),
+    h("div", { class: "body" }, general, phoneCard, commandsCard, quit),
   );
 }
 
@@ -525,6 +543,10 @@ async function show(next) {
     updateRelay();
   } else if (view.kind === "files") {
     await fmShow(view.id, view.path);
+  } else if (view.kind === "pad") {
+    const d = state.devices.find((x) => x.id === view.id);
+    if (!d || !d.connected) return show({ kind: "device", id: view.id });
+    $("view").replaceChildren(renderPad(d));
   } else if (view.kind === "settings") {
     try {
       $("view").replaceChildren(await renderSettings());
@@ -580,7 +602,8 @@ async function refresh() {
 
 // The phone's Back button goes up one level here before it leaves the app.
 window.perekatBack = () => {
-  if (view.kind === "files") {
+  if (view.kind === "pad") show({ kind: "device", id: view.id });
+  else if (view.kind === "files") {
     if (!fmBack()) show(narrow.matches ? { kind: "home" } : { kind: "device", id: view.id === SELF ? null : view.id });
   } else if (view.kind !== "home" && narrow.matches) show({ kind: "home" });
   else return false;

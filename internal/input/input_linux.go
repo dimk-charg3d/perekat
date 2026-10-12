@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -115,9 +116,15 @@ func NewInjector() (Injector, error) {
 		{uiSetKeyBit, btnLeft}, {uiSetKeyBit, btnRight}, {uiSetKeyBit, btnMiddle},
 		{uiSetKeyBit, btnSide}, {uiSetKeyBit, btnExtra},
 		{uiSetRelBit, relX}, {uiSetRelBit, relY}, {uiSetRelBit, relWheel}, {uiSetRelBit, relHWheel},
-		{uiDevSetup, uintptr(unsafe.Pointer(&setup))},
-		{uiDevCreate, 0},
 	}
+	// The keys a phone used as a remote control may press.
+	for _, code := range Keys {
+		steps = append(steps, struct{ req, arg uintptr }{uiSetKeyBit, uintptr(code)})
+	}
+	steps = append(steps,
+		struct{ req, arg uintptr }{uiDevSetup, uintptr(unsafe.Pointer(&setup))},
+		struct{ req, arg uintptr }{uiDevCreate, 0},
+	)
 	for _, s := range steps {
 		if err := ioctl(f, s.req, s.arg); err != nil {
 			f.Close()
@@ -146,6 +153,15 @@ func (u *uinputInjector) Inject(e Event) error {
 			}
 			add(evKey, code, pressed)
 		}
+	}
+	if e.Text != "" {
+		// Typing text needs the layout worked out; wtype does that.
+		go exec.Command("wtype", "--", e.Text).Run()
+	}
+	if code, ok := Keys[e.Key]; ok {
+		add(evKey, code, 1)
+		add(evSyn, 0, 0)
+		add(evKey, code, 0)
 	}
 	if len(evs) == 0 {
 		return nil

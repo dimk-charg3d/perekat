@@ -320,6 +320,8 @@ func (c *Core) readLoop(l *link.Link) {
 			c.handleShares(l, p)
 		case protocol.TypeClipImage:
 			c.handleClipImage(l, p)
+		case protocol.TypeNotification:
+			c.handleNotification(l, p)
 		default:
 			c.log.Debug("unhandled packet", "device", l.Peer.DeviceName, "type", p.Type)
 		}

@@ -648,6 +648,20 @@ input.cmd-name { flex: 0 0 30%; }
 .pdf-page { max-width: 100%; background: #fff; border-radius: 4px; overflow: hidden; }
 .pdf-page canvas { display: block; width: 100%; height: auto; }
 
+/* Remote control */
+.pad { display: flex; flex-direction: column; gap: 12px; height: 100%; max-width: 560px; }
+.pad header { margin-bottom: 4px; }
+.pad-area { flex: 1; min-height: 220px; display: grid; place-items: center; padding: 24px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); text-align: center; touch-action: none; }
+.pad-area span { max-width: 240px; pointer-events: none; }
+.pad-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pad-button, .pad-key { height: 48px; border: 0; border-radius: 12px; background: var(--card); color: var(--text); font: inherit; }
+.pad-button:active, .pad-key:active { background: var(--hover); }
+.pad-typing input { flex: 1; min-width: 0; }
+.pad-keys { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.pad-keys.media { grid-template-columns: repeat(6, 1fr); }
+.pad-key-icon { display: grid; place-items: center; }
+.pad-key-icon svg { width: 20px; height: 20px; }
+
 @media (max-width: 720px) {
   #app { grid-template-columns: 1fr; }
   aside { border-right: 0; padding: 20px 14px 14px; }

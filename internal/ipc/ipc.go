@@ -23,6 +23,7 @@ import (
 	"github.com/charg3d/perekat/internal/core"
 	"github.com/charg3d/perekat/internal/deploy"
 	"github.com/charg3d/perekat/internal/identity"
+	"github.com/charg3d/perekat/internal/input"
 	"github.com/charg3d/perekat/internal/protocol"
 )
 
@@ -124,6 +125,13 @@ func Handler(c *core.Core) http.Handler {
 			return err
 		}
 		return c.SendText(device, text)
+	})
+	act("POST /input", func(device string, r *http.Request) error {
+		var events []input.Event
+		if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
+			return err
+		}
+		return c.SendInput(device, events)
 	})
 	act("POST /ring", func(device string, _ *http.Request) error { return c.Ring(device) })
 	act("POST /run", func(device string, r *http.Request) error {

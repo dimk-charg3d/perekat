@@ -52,6 +52,7 @@ function httpApi() {
       await call("POST", "/upload" + of(id), form);
       return picked.length;
     },
+    Input: (id, events) => call("POST", "/input" + of(id), events),
     FS: (id, request) => call("POST", "/fs" + of(id), request),
     FSPaste: (src, paths, dst, dir, move) => call("POST", "/fs/paste", { src, paths, dst, dir, move }),
     UIState: async () => JSON.stringify((await call("GET", "/ui")) || {}),

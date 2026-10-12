@@ -15,6 +15,7 @@ import (
 
 	"github.com/charg3d/perekat/internal/clipboard"
 	"github.com/charg3d/perekat/internal/desktop"
+	"github.com/charg3d/perekat/internal/input"
 	"github.com/charg3d/perekat/internal/link"
 	"github.com/charg3d/perekat/internal/protocol"
 )
@@ -353,4 +354,51 @@ func (c *Core) RunBattery(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// SendInput replays mouse and keyboard actions on a device: what a phone
+// used as a remote control sends.
+func (c *Core) SendInput(query string, events []input.Event) error {
+	l, err := c.pairedLink(query)
+	if err != nil {
+		return err
+	}
+	if !accepts(l.Peer, protocol.TypeInput) {
+		return errors.New("device cannot be controlled")
+	}
+	for _, e := range events {
+		if err := send(l, protocol.TypeInput, e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Notification is a notification shown on this device, passed on to the
+// computers so that it is seen there too.
+type Notification struct {
+	App   string `json:"app"`
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
+
+// Notified sends a notification of this device to the paired computers.
+func (c *Core) Notified(n Notification) {
+	for _, l := range c.pairedLinks() {
+		if accepts(l.Peer, protocol.TypeNotification) && l.Peer.DeviceType != "phone" {
+			send(l, protocol.TypeNotification, n)
+		}
+	}
+}
+
+func (c *Core) handleNotification(l *link.Link, p protocol.Packet) {
+	var n Notification
+	if err := json.Unmarshal(p.Body, &n); err != nil || (n.Title == "" && n.Text == "") {
+		return
+	}
+	title := n.Title
+	if n.App != "" && n.App != n.Title {
+		title = n.App + ": " + n.Title
+	}
+	desktop.Notify(title+" · "+l.Peer.DeviceName, n.Text)
 }

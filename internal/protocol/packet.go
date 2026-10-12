@@ -38,6 +38,8 @@ const (
 	TypeFSResponse = "perekat.fs.response"
 	// TypeClipImage carries a picture copied to the clipboard.
 	TypeClipImage = "perekat.clipboard.image"
+	// TypeNotification passes on a notification shown on a phone.
+	TypeNotification = "perekat.notification"
 	// TypeShares lists the network folders a device offers.
 	TypeShares = "perekat.shares"
 )
@@ -50,6 +52,7 @@ var Capabilities = []string{
 	TypeFSRequest,
 	TypeFSResponse,
 	TypeShares,
+	TypeNotification,
 	TypeClipImage,
 	TypeClipboard,
 	TypeClipboardConnect,
