@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -314,7 +315,9 @@ func main() {
 
 	a := &App{client: client, view: *view, open: *open}
 	// PEREKAT_BROWSER shows the interface in the browser instead of a window.
-	if os.Getenv("PEREKAT_BROWSER") != "" {
+	// Without the component a window is drawn with, the interface goes
+	// into a browser window at once: nothing is asked and nothing installed.
+	if os.Getenv("PEREKAT_BROWSER") != "" || !canMakeWindow() {
 		if err := inBrowser(ctx, stop); err != nil {
 			fmt.Fprintln(os.Stderr, "perekat:", err)
 		}
@@ -380,7 +383,7 @@ func inBrowser(ctx context.Context, quit func()) error {
 	if c == nil {
 		// Another perekat is already running and serving the page: go there.
 		if address, err := os.ReadFile(note); err == nil && len(address) > 0 {
-			return desktop.Open(string(address))
+			return showPage(string(address))
 		}
 		return errors.New("no window could be opened")
 	}
@@ -396,6 +399,29 @@ func inBrowser(ctx context.Context, quit func()) error {
 	defer os.Remove(note)
 	host := http.NewServeMux()
 	host.HandleFunc("POST /host/quit", func(w http.ResponseWriter, r *http.Request) { quit() })
-	desktop.Open(address)
+	showPage(address)
 	return ipc.ServeHTTP(ctx, ln, c, token, ui.Assets(), host)
+}
+
+// showPage shows the interface as a window of its own where a browser can
+// do that, and as an ordinary browser tab where none can. The window may be
+// closed and opened again; perekat keeps running behind it.
+func showPage(address string) error {
+	dir, err := identity.Dir()
+	if err != nil {
+		return desktop.Open(address)
+	}
+	for _, browser := range appBrowsers() {
+		if _, err := os.Stat(browser); err != nil {
+			continue
+		}
+		// A profile of its own keeps the window apart from the user's browser.
+		cmd := exec.Command(browser, "--app="+address, "--user-data-dir="+filepath.Join(dir, "window"),
+			"--window-size=1000,680", "--no-first-run", "--no-default-browser-check")
+		if cmd.Start() == nil {
+			go cmd.Wait()
+			return nil
+		}
+	}
+	return desktop.Open(address)
 }
