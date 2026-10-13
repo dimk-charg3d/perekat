@@ -11,7 +11,7 @@ ICONDIR := $(PREFIX)/share/icons/hicolor/scalable/apps
 
 RELAY_DIR := internal/deploy/bin
 
-.PHONY: all cli gui relay windows android test clean install uninstall dist
+.PHONY: all cli gui relay windows android test clean install uninstall dist downloads
 
 all: cli gui
 
@@ -66,3 +66,14 @@ install: all
 
 uninstall:
 	rm -f $(BINDIR)/perekat $(BINDIR)/perekat-gui $(ICONDIR)/perekat.svg $(APPDIR)/perekat.desktop
+
+# downloads refreshes the ready-made builds kept in the repository, for
+# getting perekat onto a new machine straight from GitHub.
+downloads: all windows android
+	rm -rf downloads/.stage && mkdir -p downloads/.stage/perekat-linux downloads/.stage/perekat-windows
+	cp bin/perekat bin/perekat-gui packaging/perekat.desktop packaging/perekat.svg packaging/install.sh LICENSE downloads/.stage/perekat-linux/
+	cp bin/perekat.exe bin/perekat-gui.exe LICENSE downloads/.stage/perekat-windows/
+	tar -C downloads/.stage -czf downloads/perekat-linux.tar.gz perekat-linux
+	cd downloads/.stage && python3 -m zipfile -c ../perekat-windows.zip perekat-windows
+	cp bin/perekat.apk downloads/perekat-android.apk
+	rm -rf downloads/.stage
