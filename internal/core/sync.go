@@ -88,12 +88,15 @@ func (c *Core) Sync(query string) (SyncSettings, error) {
 	p := c.peerSync(id)
 	s := SyncSettings{
 		Clipboard: !p.ClipboardOff, Notifications: !p.NotifyOff, Files: !p.FilesOff, FileAccess: !p.FileAccessOff,
-		Input: p.InputOn, MainSelf: p.Main == "" || p.Main == c.links.Self.DeviceID, Side: p.Side,
+		Input: p.InputOn, MainSelf: c.isMain(c.links.Self.DeviceID), Side: p.Side,
 	}
+	main := c.mainID()
 	if s.Side == "" {
 		s.Side = "right"
 	}
 	switch {
+	case main != id && main != c.links.Self.DeviceID:
+		s.InputWhy = "a mouse and keyboard are shared with the main device: choose it in the settings"
 	case d == nil || d.link == nil:
 		s.InputWhy = "the device is not connected"
 	case !accepts(d.identity, protocol.TypeKVM) || d.identity.DeviceType == "phone" || c.links.Self.DeviceType == "phone":
@@ -121,9 +124,11 @@ func (c *Core) SaveSync(query string, s SyncSettings) error {
 		return errors.New("the side must be left, right, top or bottom")
 	}
 	p := peerSync{ClipboardOff: !s.Clipboard, NotifyOff: !s.Notifications, FilesOff: !s.Files, FileAccessOff: !s.FileAccess, InputOn: s.Input, Side: s.Side}
-	p.Main = id
-	if s.MainSelf {
-		p.Main = c.links.Self.DeviceID
+	// The mouse and keyboard are the main device's; without one of the two
+	// being it, there is nothing to share.
+	p.Main = c.mainID()
+	if p.Main != id && p.Main != c.links.Self.DeviceID {
+		p.InputOn = false
 	}
 	if err := c.setPeerSync(id, p); err != nil {
 		return err

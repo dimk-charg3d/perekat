@@ -31,6 +31,7 @@ async function renderSync(d) {
     );
   const why = () => {
     const text = s.inputWhy || "";
+    if (text.includes("main device")) return t("inputWhyMain");
     if (text.includes("not connected")) return t("inputWhyOffline");
     if (text.includes("two computers")) return t("inputWhyPhone");
     if (text.includes("this computer")) return t("inputWhySelf");
@@ -42,19 +43,6 @@ async function renderSync(d) {
     const self = state.self.deviceName;
     const main = s.mainSelf ? self : d.name;
     const other = s.mainSelf ? d.name : self;
-    const pick = (mainSelf, label) =>
-      h(
-        "button",
-        {
-          type: "button",
-          class: "segment" + (s.mainSelf === mainSelf ? " active" : ""),
-          onclick: () => {
-            s.mainSelf = mainSelf;
-            save();
-          },
-        },
-        label,
-      );
     const place = (side) =>
       h(
         "button",
@@ -77,8 +65,7 @@ async function renderSync(d) {
         ? h(
             "div",
             { class: "desk-setup" },
-            h("p", { class: "muted small" }, t("inputMain")),
-            h("div", { class: "segments" }, pick(true, self), pick(false, d.name)),
+            h("p", { class: "muted small" }, t("inputMain", main)),
             h("p", { class: "muted small" }, t("inputWhere", other, main)),
             h("div", { class: "desk" }, place("top"), place("left"), h("div", { class: "desk-main" }, main), place("right"), place("bottom")),
             h("p", { class: "muted small" }, t("inputHow", other)),

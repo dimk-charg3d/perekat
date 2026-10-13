@@ -106,6 +106,8 @@ func (c *Core) handleShare(l *link.Link, p protocol.Packet) {
 		Filename string `json:"filename"`
 		Text     string `json:"text"`
 		URL      string `json:"url"`
+		// Mirror marks a copy of a download, which arrives without a word.
+		Mirror bool `json:"perekatMirror"`
 	}
 	if err := json.Unmarshal(p.Body, &body); err != nil {
 		return
@@ -114,7 +116,7 @@ func (c *Core) handleShare(l *link.Link, p protocol.Packet) {
 	case c.peerSync(l.Peer.DeviceID).FilesOff:
 		c.log.Info("refused what a device sent: receiving from it is switched off", "device", l.Peer.DeviceName)
 	case body.Filename != "" && p.PayloadTransferInfo != nil:
-		go c.receiveFile(l, body.Filename, p.PayloadSize, p.PayloadTransferInfo.Port)
+		go c.receiveFile(l, body.Filename, p.PayloadSize, p.PayloadTransferInfo.Port, body.Mirror)
 	case body.Text != "":
 		c.setClipboard(body.Text)
 		c.rememberClip(body.Text, l.Peer.DeviceName)
@@ -127,7 +129,7 @@ func (c *Core) handleShare(l *link.Link, p protocol.Packet) {
 	}
 }
 
-func (c *Core) receiveFile(l *link.Link, name string, size int64, port int) {
+func (c *Core) receiveFile(l *link.Link, name string, size int64, port int, quiet bool) {
 	t := c.startTransfer(l, safeName(name), size, true)
 	path, err := c.download(l, t, port)
 	c.finishTransfer(t, path, err)
@@ -136,7 +138,11 @@ func (c *Core) receiveFile(l *link.Link, name string, size int64, port int) {
 		return
 	}
 	c.log.Info("file received", "device", l.Peer.DeviceName, "path", path)
-	desktop.Notify("Файл от "+l.Peer.DeviceName, path)
+	// What came through perekat is not a download to copy onwards.
+	c.mirrorSkip(path)
+	if !quiet {
+		desktop.Notify("Файл от "+l.Peer.DeviceName, path)
+	}
 }
 
 func (c *Core) download(l *link.Link, t *transfer, port int) (string, error) {
@@ -229,6 +235,10 @@ func (c *Core) SendFiles(query string, paths []string) error {
 }
 
 func (c *Core) sendFile(l *link.Link, path string) error {
+	return c.sendFileAs(l, path, false)
+}
+
+func (c *Core) sendFileAs(l *link.Link, path string, mirror bool) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -251,6 +261,7 @@ func (c *Core) sendFile(l *link.Link, path string) error {
 		"lastModified":     info.ModTime().UnixMilli(),
 		"numberOfFiles":    1,
 		"totalPayloadSize": info.Size(),
+		"perekatMirror":    mirror,
 	})
 	if err != nil {
 		cancel()

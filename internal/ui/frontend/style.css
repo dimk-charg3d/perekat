@@ -650,6 +650,10 @@ input.cmd-name { flex: 0 0 30%; }
 .pdf-page { max-width: 100%; background: #fff; border-radius: 4px; overflow: hidden; }
 .pdf-page canvas { display: block; width: 100%; height: auto; }
 
+.main-mark { display: inline-grid; margin-left: 6px; vertical-align: -2px; color: var(--accent); }
+.main-mark svg { width: 13px; height: 13px; fill: currentColor; }
+label > select { height: 40px; padding: 0 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; color: var(--text); font: inherit; }
+
 /* Sharing with one device */
 .switch-line.off { opacity: 0.55; }
 .desk-setup { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }

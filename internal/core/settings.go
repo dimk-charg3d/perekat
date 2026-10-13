@@ -33,6 +33,12 @@ type Settings struct {
 	// CanAutostart is false where the system gives no say in it.
 	Autostart    bool `json:"autostart"`
 	CanAutostart bool `json:"canAutostart"`
+	// Main is the main device: "self", the id of a paired device, or empty
+	// when none is chosen. What is downloaded on the other devices is copied
+	// to it, and its mouse and keyboard are the ones that can be shared.
+	Main string `json:"main"`
+	// Mirror copies what lands in this device's downloads to the main device.
+	Mirror bool `json:"mirror"`
 	// Colors maps a device id to the colour the window shows it in.
 	Colors map[string]string `json:"colors"`
 }
@@ -47,6 +53,11 @@ type storedSettings struct {
 	FileAccessOff bool              `json:"fileAccessOff,omitempty"`
 	Colors        map[string]string `json:"colors,omitempty"`
 	Shares        []Share           `json:"shares,omitempty"`
+	// Main is the id of the main device and MainTime when it was chosen,
+	// so that the latest choice wins on every device.
+	Main      string `json:"main,omitempty"`
+	MainTime  int64  `json:"mainTime,omitempty"`
+	MirrorOff bool   `json:"mirrorOff,omitempty"`
 	// Sync is what is shared with each paired device, by device id.
 	Sync map[string]peerSync `json:"sync,omitempty"`
 }
@@ -74,6 +85,8 @@ func (c *Core) Settings() Settings {
 		Language:     c.stored.Language,
 		KDEConnect:   c.stored.KDEConnectOn,
 		FileAccess:   !c.stored.FileAccessOff,
+		Main:         c.mainForUI(),
+		Mirror:       !c.stored.MirrorOff,
 		Autostart:    desktop.Autostart(),
 		CanAutostart: desktop.CanAutostart,
 		Colors:       map[string]string{},
@@ -119,6 +132,9 @@ func (c *Core) SaveSettings(s Settings) error {
 		Colors:        s.Colors,
 		Shares:        c.stored.Shares,
 		Sync:          c.stored.Sync,
+		Main:          c.stored.Main,
+		MainTime:      c.stored.MainTime,
+		MirrorOff:     !s.Mirror,
 	}
 	if s.DownloadDir == desktop.DownloadsDir() {
 		c.stored.DownloadDir = ""
@@ -129,6 +145,7 @@ func (c *Core) SaveSettings(s Settings) error {
 	if err := os.WriteFile(c.settingsPath(), data, 0o600); err != nil {
 		return err
 	}
+	c.chooseMain(s.Main)
 	if desktop.CanAutostart && s.Autostart != desktop.Autostart() {
 		if err := desktop.SetAutostart(s.Autostart); err != nil {
 			return err

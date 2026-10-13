@@ -167,6 +167,7 @@ func (c *Core) pasteOne(src, path, dst, dstDir string, move bool, id, device str
 	}
 	c.finishTransfer(t, shownPath, err)
 	if err == nil && dst == SelfDevice && src != SelfDevice {
+		c.mirrorSkip(top)
 		desktop.Notify("Файл от "+device, top)
 	}
 }

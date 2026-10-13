@@ -180,7 +180,7 @@ function renderSidebar() {
         "button",
         { class: "device" + ((view.kind === "device" || view.kind === "sync") && view.id === d.id ? " active" : ""), onclick: () => show({ kind: "device", id: d.id }) },
         tinted(h("span", { class: "device-icon" + (d.paired ? " paired" : ""), icon: d.type }), d.id),
-        h("span", { class: "device-text" }, h("span", { class: "device-name" }, d.name), h("span", { class: "device-status" }, h("i", { class: dotClass(d) }), shortStatus(d))),
+        h("span", { class: "device-text" }, h("span", { class: "device-name" }, d.name, d.main ? h("span", { class: "main-mark", title: t("mainMark"), icon: "star" }) : null), h("span", { class: "device-status" }, h("i", { class: dotClass(d) }), shortStatus(d))),
       ),
     ),
   );
@@ -476,6 +476,8 @@ async function renderSettings() {
           settings.kdeConnect = $("set-kde").checked;
           settings.fileAccess = $("set-files").checked;
           if ($("set-autostart")) settings.autostart = $("set-autostart").checked;
+          settings.main = $("set-main").value;
+          settings.mirror = $("set-mirror").checked;
           await api.SaveSettings(settings);
         }, t("saved"));
       },
@@ -523,6 +525,25 @@ async function renderSettings() {
       { class: "switch-line" },
       h("span", {}, t("fileAccess"), h("span", { class: "muted small block" }, t("fileAccessHint"))),
       h("input", { id: "set-files", type: "checkbox", class: "switch", checked: settings.fileAccess }),
+    ),
+    h(
+      "label",
+      {},
+      t("mainDevice"),
+      h(
+        "select",
+        { id: "set-main" },
+        h("option", { value: "", selected: !settings.main }, t("mainNone")),
+        h("option", { value: "self", selected: settings.main === "self" }, t("thisDeviceShort", settings.name)),
+        ...state.devices.filter((d) => d.paired).map((d) => h("option", { value: d.id, selected: settings.main === d.id }, d.name)),
+      ),
+      h("span", { class: "muted small" }, t("mainHint")),
+    ),
+    h(
+      "label",
+      { class: "switch-line" },
+      h("span", {}, t("mirror"), h("span", { class: "muted small block" }, t("mirrorHint"))),
+      h("input", { id: "set-mirror", type: "checkbox", class: "switch", checked: settings.mirror }),
     ),
     settings.canAutostart
       ? h(

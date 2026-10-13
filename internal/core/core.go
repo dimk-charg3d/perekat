@@ -85,6 +85,8 @@ type DeviceInfo struct {
 	CanRemote bool `json:"canRemote,omitempty"`
 	// CanBrowse is set when the device's files can be browsed.
 	CanBrowse bool `json:"canBrowse,omitempty"`
+	// Main marks the main device.
+	Main bool `json:"main,omitempty"`
 	// CanLock is set when the device can be asked to lock its screen.
 	CanLock bool `json:"canLock,omitempty"`
 	// CanRing is set when the device can be asked to play a sound.
@@ -145,6 +147,7 @@ type Core struct {
 	relay    *relaySession
 
 	clips    clipHistory
+	mirror   mirrorState
 	notes    notifications
 	clipMu   sync.Mutex
 	clip     string
@@ -333,6 +336,8 @@ func (c *Core) readLoop(l *link.Link) {
 			c.handleNotification(l, p)
 		case protocol.TypeKVM:
 			c.handleKVM(l, p)
+		case protocol.TypeMain:
+			c.handleMain(l, p)
 		case protocol.TypeLock:
 			c.log.Info("asked to lock", "device", l.Peer.DeviceName)
 			go desktop.Lock()
@@ -505,6 +510,7 @@ func (c *Core) info(id string, d *device) DeviceInfo {
 		CanBrowse:  paired && accepts(d.identity, protocol.TypeFSRequest),
 		CanRing:    paired && accepts(d.identity, protocol.TypeRing),
 		CanLock:    paired && accepts(d.identity, protocol.TypeLock),
+		Main:       c.isMain(id),
 		Commands:   d.commands,
 		Battery:    d.battery,
 		Shares:     d.shares,
@@ -807,6 +813,7 @@ func (c *Core) greet(l *link.Link) {
 	c.sendBattery(l)
 	c.sendShares(l)
 	c.greetKVM(l)
+	c.greetMain(l)
 }
 
 // speaksPerekat reports whether the device understands perekat's own packets.

@@ -46,6 +46,8 @@ const (
 	TypeLock = "perekat.lock"
 	// TypeNotifyReply answers a message shown in a notification of a phone.
 	TypeNotifyReply = "perekat.notification.reply"
+	// TypeMain names the main device of the user's devices.
+	TypeMain = "perekat.main"
 	// TypeShares lists the network folders a device offers.
 	TypeShares = "perekat.shares"
 )
@@ -58,6 +60,7 @@ var Capabilities = []string{
 	TypeFSRequest,
 	TypeFSResponse,
 	TypeShares,
+	TypeMain,
 	TypeLock,
 	TypeNotifyReply,
 	TypeKVM,
