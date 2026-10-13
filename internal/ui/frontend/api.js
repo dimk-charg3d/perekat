@@ -86,7 +86,9 @@ function httpApi() {
     RelayJoin: (code) => call("POST", "/relay/join", code),
     RelayLeave: () => call("POST", "/relay/leave"),
     Copy: (text) => navigator.clipboard.writeText(text),
-    Quit: () => window.Android && window.Android.quit(),
+    // Quitting ends the application on a phone, and perekat itself where the
+    // page stands in for a window that could not be opened.
+    Quit: () => (window.Android ? window.Android.quit() : call("POST", "/host/quit").then(() => document.body.replaceChildren())),
     InitialView: async () => new URLSearchParams(location.search).get("view") || "",
   };
 }

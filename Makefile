@@ -29,7 +29,7 @@ gui: relay
 
 windows: relay
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(STAMP)" -o bin/perekat.exe ./cmd/perekat
-	GOOS=windows GOARCH=amd64 go build -tags $(GUI_TAGS) -ldflags "-H windowsgui $(STAMP)" -o bin/perekat-gui.exe ./cmd/perekat-gui
+	GOOS=windows GOARCH=amd64 go build -tags $(GUI_TAGS),wv2runtime.embed -ldflags "-H windowsgui $(STAMP)" -o bin/perekat-gui.exe ./cmd/perekat-gui
 
 # The Android application; needs the Android SDK (build-tools and a platform).
 android:

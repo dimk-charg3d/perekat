@@ -4,15 +4,21 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -24,6 +30,8 @@ import (
 	"github.com/charg3d/perekat/internal/app"
 	"github.com/charg3d/perekat/internal/core"
 	"github.com/charg3d/perekat/internal/deploy"
+	"github.com/charg3d/perekat/internal/desktop"
+	"github.com/charg3d/perekat/internal/identity"
 	"github.com/charg3d/perekat/internal/ipc"
 	"github.com/charg3d/perekat/internal/protocol"
 	"github.com/charg3d/perekat/internal/ui"
@@ -225,8 +233,12 @@ func (a *App) Quit() { runtime.Quit(a.ctx) }
 // onReply is set once the window exists; the daemon calls it through.
 var onReply func(deviceID string)
 
+// daemonCore is the daemon running inside this process, once it is up.
+var daemonCore atomic.Pointer[core.Core]
+
 func init() {
 	app.Extra = func(ctx context.Context, c *core.Core) error {
+		daemonCore.Store(c)
 		c.OnReply = func(id string) {
 			if onReply != nil {
 				onReply(id)
@@ -301,6 +313,14 @@ func main() {
 	}
 
 	a := &App{client: client, view: *view, open: *open}
+	// PEREKAT_BROWSER shows the interface in the browser instead of a window.
+	if os.Getenv("PEREKAT_BROWSER") != "" {
+		if err := inBrowser(ctx, stop); err != nil {
+			fmt.Fprintln(os.Stderr, "perekat:", err)
+		}
+		shutdown()
+		return
+	}
 	err = wails.Run(&options.App{
 		Title:             "Перекат",
 		Width:             980,
@@ -334,9 +354,48 @@ func main() {
 			},
 		},
 	})
-	shutdown()
 	if err != nil {
+		// No window could be made: on Windows that means the WebView2
+		// runtime is missing and could not be installed. The interface is
+		// the same in a browser, so it is shown there.
 		fmt.Fprintln(os.Stderr, "perekat:", err)
-		os.Exit(1)
+		if berr := inBrowser(ctx, stop); berr != nil {
+			fmt.Fprintln(os.Stderr, "perekat:", berr)
+			shutdown()
+			os.Exit(1)
+		}
 	}
+	shutdown()
+}
+
+// inBrowser serves the interface on a local port and opens it in the
+// default browser. It returns when the user quits from the page.
+func inBrowser(ctx context.Context, quit func()) error {
+	dir, err := identity.Dir()
+	if err != nil {
+		return err
+	}
+	note := filepath.Join(dir, "browser-url")
+	c := daemonCore.Load()
+	if c == nil {
+		// Another perekat is already running and serving the page: go there.
+		if address, err := os.ReadFile(note); err == nil && len(address) > 0 {
+			return desktop.Open(string(address))
+		}
+		return errors.New("no window could be opened")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	var raw [16]byte
+	rand.Read(raw[:])
+	token := hex.EncodeToString(raw[:])
+	address := fmt.Sprintf("http://%s/#%s", ln.Addr(), token)
+	os.WriteFile(note, []byte(address), 0o600)
+	defer os.Remove(note)
+	host := http.NewServeMux()
+	host.HandleFunc("POST /host/quit", func(w http.ResponseWriter, r *http.Request) { quit() })
+	desktop.Open(address)
+	return ipc.ServeHTTP(ctx, ln, c, token, ui.Assets(), host)
 }
